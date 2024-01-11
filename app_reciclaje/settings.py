@@ -31,7 +31,7 @@ CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOW_ALL_ORIGINS = True
 
-
+DEFAULT_CHARSET = 'utf-8'
 
 # Application definition
 
