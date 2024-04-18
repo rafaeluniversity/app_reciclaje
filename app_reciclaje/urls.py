@@ -18,11 +18,13 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.documentation import include_docs_urls
 
-from api.views import (registroEmpresa, registroPersona, 
+from api.views import (registroEmpresa, registroPersona,
                        registroReciclador, login_view,
                        generar_solicitud, actualizar_solicitud,
                        marcar_solicitud_entregada, agregar_calificacion,
-                       crear_reporte, marcar_reporte_inactivo)
+                       crear_reporte, marcar_reporte_inactivo, crearRol,
+                       obtenerInformacionUsuario, listaRecicladoresEmpresa,
+                       actualizacionDeCampos, obtener_territorios)
 
 
 urlpatterns = [
@@ -30,8 +32,8 @@ urlpatterns = [
     path('api/v1/', include('api.urls')),
     path('docs/', include_docs_urls(title='Api Documentation')),
     path('api/v1/registro_empresa/', registroEmpresa, name='registro_empresa'),
-    path('api/v1/registro_persona/', registroPersona, name='registro_persona'),  
-    path('api/v1/registro_reciclador/', registroReciclador, name='registro_reciclador'),  
+    path('api/v1/registro_persona/', registroPersona, name='registro_persona'),
+    path('api/v1/registro_reciclador/', registroReciclador, name='registro_reciclador'),
     path('api/v1/login_view/', login_view, name='login_view'),
     path('api/v1/generar_solicitud/', generar_solicitud, name='generar_solicitud'),
     path('api/v1/actualizar_solicitud/', actualizar_solicitud, name='actualizar_solicitud'),
@@ -39,4 +41,10 @@ urlpatterns = [
     path('api/v1/agregar_calificacion/', agregar_calificacion, name='agregar_calificacion'),
     path('api/v1/crear_reporte/', crear_reporte, name='crear_reporte'),
     path('api/v1/marcar_reporte_inactivo/', marcar_reporte_inactivo, name='marcar_reporte_inactivo'),
+    path('api/v1/crearRol/', crearRol, name='crear_rol'),
+    path('api/v1/obtener_informacion_usuario/', obtenerInformacionUsuario, name='obtener_informacion_usuario'),
+    path('api/v1/lista_recicladores_empresa/', listaRecicladoresEmpresa, name='lista_recicladores_empresa'),
+    path('api/v1/actualizar_usuario/', actualizacionDeCampos, name='actualizar_usuario'),
+    path('api/v1/territorios/', obtener_territorios, name='obtener_territorios'),
+
 ]

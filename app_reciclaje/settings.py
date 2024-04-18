@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-of!f09h8cu^9!(2sw5u*1#u047-2b$qbd8ao$@m+3yhf5^o^l-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['rafaeloxj.pythonanywhere.com']
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -55,6 +55,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
 ]
 
 ROOT_URLCONF = 'app_reciclaje.urls'
@@ -84,10 +86,10 @@ WSGI_APPLICATION = 'app_reciclaje.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'app-reciclaje',
-        'USER': 'root',
-        'PASSWORD': 'rafael1316232485',
-        'HOST': 'localhost',
+        'NAME': 'rafaeloxj$app-reciclaje',
+        'USER': 'rafaeloxj',
+        'PASSWORD': 'rafael13162324852001',
+        'HOST': 'rafaeloxj.mysql.pythonanywhere-services.com',
         'PORT': '3306',
     }
 }
@@ -127,7 +129,9 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
@@ -144,7 +148,7 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.BasicAuthentication',
     ),
 }
-
+#
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # O el puerto en el que se ejecute tu aplicación React
+    "https://localost:3000",  # O el puerto en el que se ejecute tu aplicación React
 ]
