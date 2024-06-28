@@ -1,9 +1,14 @@
 from rest_framework import serializers
 from .models import (
-    Roles, Usuario, UsuarioPersona, UsuarioEmpresa, 
+    Roles, Usuario, UsuarioPersona, UsuarioEmpresa,
     RelacionEmpresa, Reciclador, Calificacion, Archivo,
-    CarnetRecolectores, SolicitudRecoleccion, ArchivosSolicitudes, 
-    ReporteDenuncias, ArchivosReportes)
+    CarnetRecolectores, SolicitudRecoleccion, ArchivosSolicitudes,
+    ReporteDenuncias, ArchivosReportes, Imagen)
+
+class ImagenSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Imagen
+        fields = ('id_imagen', 'imagen', 'get_image_url')
 
 class RolesSerializer(serializers.ModelSerializer):
     class Meta:

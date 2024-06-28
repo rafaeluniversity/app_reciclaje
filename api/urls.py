@@ -16,6 +16,7 @@ router.register(r'solicitudes-recoleccion', views.SolicitudRecoleccionViewSet)
 router.register(r'archivos-solicitudes', views.ArchivosSolicitudesViewSet)
 router.register(r'reportes-denuncias', views.ReporteDenunciasViewSet)
 router.register(r'archivos-reportes', views.ArchivosReportesViewSet)
+router.register(r'imagenes', views.ImagenViewSet)
 
 
 urlpatterns = [

@@ -2,6 +2,16 @@ from django.db import models
 from django.db.models import JSONField
 # Create your models here.
 
+class Imagen(models.Model):
+    id_imagen = models.AutoField(primary_key=True)
+    imagen = models.ImageField(upload_to='imagenes/')
+
+    def get_image_url(self):
+        return self.imagen.url
+
+    def __str__(self):
+        return f"ID: {self.id_imagen}, URL: {self.get_image_url()}"
+
 class Roles(models.Model):
     id_rol = models.CharField(primary_key=True, max_length=13, unique=True)
     descripcion = models.CharField(max_length=1000)
@@ -19,7 +29,6 @@ class Roles(models.Model):
 
     def __str__(self):
         return self.id_rol
-
 
 class Usuario(models.Model):
     id_usuario = models.CharField(primary_key=True, max_length=13)
@@ -70,7 +79,6 @@ class UsuarioPersona(Usuario):
     def __str__(self):
         return f"{self.nombres} {self.apellidos}"
 
-
 class UsuarioEmpresa(Usuario):
     id_empresa = models.CharField(max_length=13, unique=True)
     razon_social = models.CharField(max_length=200)
@@ -79,6 +87,7 @@ class UsuarioEmpresa(Usuario):
     nom_rep_legal = models.CharField(max_length=200)
     direccion = models.CharField(max_length=200)
     redes = JSONField(default=dict)  # Cambiar a JSONField para almacenar datos JSON
+    ruc = models.CharField(max_length=13, unique=True)  # Nuevo campo para el RUC
 
     def save(self, *args, **kwargs):
         # Lógica de generación de id_empresa si es necesario
@@ -91,7 +100,7 @@ class UsuarioEmpresa(Usuario):
         super(UsuarioEmpresa, self).save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.razon_social} ({self.id_empresa})"
+        return f"{self.razon_social} ({self.ruc})"
 
 class RelacionEmpresa(models.Model):
     id_empresa = models.ForeignKey(UsuarioEmpresa, on_delete=models.CASCADE, related_name='empresa_padre')
@@ -107,7 +116,7 @@ class Reciclador(UsuarioPersona):
     nacionalidad = models.CharField(max_length=100)
 
     ESTADO_CHOICES = [('A', 'Activo'), ('I', 'Inactivo'), ('E', 'Espera')]
-    estado_reciclador = models.CharField(max_length=1, choices=ESTADO_CHOICES, default='I')
+    estado_reciclador = models.CharField(max_length=1, choices=ESTADO_CHOICES, default='E')
 
     def save(self, *args, **kwargs):
         if not self.id_reciclador:
@@ -217,3 +226,26 @@ class Territorio(models.Model):
     class Meta:
         db_table = 'urm_territorios'
 
+class TipoMaterial(models.Model):
+    id_tipo_material = models.AutoField(primary_key=True)
+    descripcion = models.CharField(max_length=255)
+    ESTADO_CHOICES = [('A', 'Activo'), ('I', 'Inactivo')]
+    estado = models.CharField(max_length=1, choices=ESTADO_CHOICES, default='A')
+
+    def __str__(self):
+        return f"TipoMaterial {self.id_tipo_material} - Descripción: {self.descripcion}, Estado: {self.estado}"
+
+class RegistroReciclaje(models.Model):
+    id_registro = models.AutoField(primary_key=True)
+    id_reciclador = models.ForeignKey(Reciclador, on_delete=models.CASCADE)
+    id_material = models.ForeignKey(TipoMaterial, on_delete=models.CASCADE)
+    peso = models.DecimalField(max_digits=10, decimal_places=2)
+    id_usuario_ingreso = models.ForeignKey(Usuario, related_name='usuario_ingreso', on_delete=models.CASCADE)
+    fecha_ingreso = models.DateTimeField(auto_now_add=True)
+    fecha_modificacion = models.DateTimeField(auto_now=True)
+    id_usuario_modificacion = models.ForeignKey(Usuario, related_name='usuario_modificacion', on_delete=models.CASCADE,default="")
+    ESTADO_CHOICES = [('A', 'Activo'), ('I', 'Inactivo')]
+    estado = models.CharField(max_length=1, choices=ESTADO_CHOICES, default='A')
+
+    def __str__(self):
+        return f"RegistroReciclaje {self.id_registro} - Reciclador: {self.id_reciclador}, Material: {self.id_material}, Peso: {self.peso}kg, Estado: {self.estado}"

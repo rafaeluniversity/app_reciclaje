@@ -8,6 +8,8 @@ from datetime import datetime
 from django.db.models import Value, CharField
 from django.db.models.functions import Concat
 from django.db.models.functions import Replace
+from django.http import HttpRequest
+from django.shortcuts import get_object_or_404
 
 from .serializer import (
     RolesSerializer,
@@ -22,7 +24,8 @@ from .serializer import (
     SolicitudRecoleccionSerializer,
     ArchivosSolicitudesSerializer,
     ReporteDenunciasSerializer,
-    ArchivosReportesSerializer
+    ArchivosReportesSerializer,
+    ImagenSerializer
 )
 
 from .models import (
@@ -39,9 +42,15 @@ from .models import (
     ArchivosSolicitudes,
     ReporteDenuncias,
     ArchivosReportes,
-    Territorio
+    Territorio,
+    Imagen,
+    TipoMaterial,
+    RegistroReciclaje
 )
 
+class ImagenViewSet(viewsets.ModelViewSet):
+    queryset = Imagen.objects.all()
+    serializer_class = ImagenSerializer
 
 class RolesViewSet(viewsets.ModelViewSet):
     queryset = Roles.objects.all()
@@ -94,6 +103,89 @@ class ReporteDenunciasViewSet(viewsets.ModelViewSet):
 class ArchivosReportesViewSet(viewsets.ModelViewSet):
     queryset = ArchivosReportes.objects.all()
     serializer_class = ArchivosReportesSerializer
+"""
+def guardar_imagen(request):
+    try:
+        if request.method == "POST":
+            # Decodificar y cargar los datos del cuerpo de la solicitud JSON
+            body_unicode = request.body.decode('utf-8')
+            body_data = json.loads(body_unicode)
+
+            # Extraer datos del cuerpo de la solicitud
+            imagen_data = body_data.get("imagen")
+
+            # Crear un nuevo objeto de Imagen
+            imagen = Imagen(imagen=imagen_data)
+
+            # Guardar el objeto en la base de datos
+            imagen.save()
+
+            # Retornar el ID y la URL de la imagen creada
+            return JsonResponse({"id_imagen": imagen.id_imagen, "url_imagen": imagen.get_image_url()}, charset='utf-8')
+
+        else:
+            return JsonResponse({"error": "Método no permitido"}, charset='utf-8')
+
+    except Exception as e:
+        # Imprimir detalles de la excepción
+        print(f"Error al guardar la imagen: {str(e)}")
+
+        # Devolver un error más informativo
+        return JsonResponse({"error": f"Ocurrió un error al procesar la solicitud: {str(e)}"}, charset='utf-8')
+"""
+
+def enviar_solicitud(request):
+    if request.method == "POST":
+        body_unicode = request.body.decode('utf-8')
+        body_data = json.loads(body_unicode)
+
+        id_reciclador = body_data.get("id_reciclador")
+        id_empresa = body_data.get("id_empresa")
+
+        try:
+            reciclador = Reciclador.objects.get(id_reciclador=id_reciclador)
+            try:
+                empresa = UsuarioEmpresa.objects.get(id_empresa=id_empresa)
+                reciclador.estado_reciclador = "E"  # Cambiar estado a "Espera"
+                reciclador.id_empresa = id_empresa  # Asignar el id de la empresa
+                reciclador.save()
+                return JsonResponse({"message": "Solicitud enviada correctamente", "success": True})
+            except UsuarioEmpresa.DoesNotExist:
+                return JsonResponse({"error": "La empresa especificada no existe"})
+        except Reciclador.DoesNotExist:
+            return JsonResponse({"error": "Reciclador no encontrado"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)})
+    else:
+        return JsonResponse({"error": "Método no permitido"})
+
+def guardar_imagen(request):
+    try:
+        if request.method == "POST":
+            # Verificar si la solicitud contiene datos de archivo
+            if 'imagen' in request.FILES:
+                # Extraer el archivo de la solicitud
+                imagen = request.FILES['imagen']
+
+                # Crear un nuevo objeto de Imagen
+                nueva_imagen = Imagen(imagen=imagen)
+
+                # Guardar la imagen en la base de datos
+                nueva_imagen.save()
+
+                # Retornar el ID y la URL de la imagen creada
+                return JsonResponse({"data": {"id_imagen": nueva_imagen.id_imagen, "url_imagen": nueva_imagen.get_image_url()}, "success": True}, charset='utf-8', safe=False)
+            else:
+                return JsonResponse({"error": "No se proporcionó ninguna imagen en la solicitud"}, charset='utf-8')
+        else:
+            return JsonResponse({"error": "Método no permitido"}, charset='utf-8')
+
+    except Exception as e:
+        # Imprimir detalles de la excepción
+        print(f"Error al guardar la imagen: {str(e)}")
+
+        # Devolver un error más informativo
+        return JsonResponse({"error": f"Ocurrió un error al procesar la solicitud: {str(e)}"}, charset='utf-8')
 
 def crearRol(request):
     try:
@@ -146,15 +238,19 @@ def registroEmpresa(request):
             redes = body_data.get("redes")
             url_foto = body_data.get("url_foto")
             telefono = body_data.get("telefono")
+            ruc = body_data.get("ruc")  # Agregar el campo ruc
 
-            # Verificar la unicidad del correo electrónico y la razón social
+            # Verificar la unicidad del correo electrónico, razón social y RUC
             if UsuarioEmpresa.objects.filter(correo=correo).exists():
                 return JsonResponse({"error": "El correo electrónico ya está en uso"}, charset='utf-8')
 
             if UsuarioEmpresa.objects.filter(razon_social=razon_social).exists():
                 return JsonResponse({"error": "La razón social ya está en uso"}, charset='utf-8')
 
-                        # Convertir la cadena JSON de redes en un diccionario si es necesario
+            if UsuarioEmpresa.objects.filter(ruc=ruc).exists():
+                return JsonResponse({"error": "El RUC ya está en uso"}, charset='utf-8')
+
+            # Convertir la cadena JSON de redes en un diccionario si es necesario
             if isinstance(redes, str):
                 redes = json.loads(redes)
 
@@ -170,7 +266,8 @@ def registroEmpresa(request):
                 redes=redes,
                 id_rol=Roles.objects.get(id_rol='rol_002'),  # Asignar el rol correspondiente,
                 url_foto=url_foto,
-                telefono=telefono
+                telefono=telefono,
+                ruc=ruc  # Agregar el campo ruc
             )
 
             # Guardar el objeto en la base de datos
@@ -349,7 +446,7 @@ def login_view(request):
                     "url_foto": user.url_foto
                 }
 
-                return JsonResponse({"success": True, "user_data": user_data})
+                return JsonResponse({"success": True, "data": user_data})
             else:
                 # Las credenciales no coinciden o el usuario no existe
                 return JsonResponse({"error": "Credenciales incorrectas"})
@@ -630,6 +727,7 @@ def marcar_reporte_inactivo(request):
 
 def obtenerInformacionUsuario(request):
     try:
+
         if request.method == "POST":
             body_unicode = request.body.decode('utf-8')
             body_data = json.loads(body_unicode)
@@ -643,6 +741,9 @@ def obtenerInformacionUsuario(request):
 
             reciclador = usuario_persona.reciclador
 
+            print("ID del usuario recibido:", usuario_ptr_id)
+            print("Usuario Rol:", usuario_rol)
+            print("Reciclador:", reciclador)
 
             # Obtener información personal del usuario persona
             informacion_personal = {
@@ -758,15 +859,18 @@ def obtenerInformacionUsuario(request):
                 # Combinar información personal del usuario persona y del reciclador si existe
                 response_data = {
                     "informacion_personal": informacion_personal,
+                    "url_foto": usuario_persona.url_foto,
                     **reciclador_info
                 }
             else:
                 # Si el usuario no es un reciclador, solo devuelve la información personal
                 response_data = {
-                    "informacion_personal": informacion_personal
+                    "informacion_personal": informacion_personal,
+                    "url_foto": usuario_persona.url_foto
                 }
+            print("todo correcto, data:", response_data)
 
-            return JsonResponse(response_data, charset='utf-8')
+            return JsonResponse({"data": response_data, "success": True}, charset='utf-8')
 
         else:
             return JsonResponse({"error": "Método no permitido"}, charset='utf-8')
@@ -801,27 +905,44 @@ def listaRecicladoresEmpresa(request):
             # Serializar los recicladores para devolverlos en la respuesta
             recicladores_data = []
             for reciclador in recicladores:
-                reciclador_info = {
-                    "id_usuario ": reciclador.id_usuario,
-                    "id_reciclador": reciclador.id_reciclador,
-                    "nombres": reciclador.nombres,
-                    "apellidos": reciclador.apellidos,
-                    "correo": reciclador.correo,
-                    "estado_reciclador": reciclador.estado_reciclador,
-                    "provincia": reciclador.provincia,
-                    "ciudad": reciclador.ciudad,
-                    "direccion": reciclador.direccion,
-                    "fec_nac": reciclador.fec_nac.strftime('%Y-%m-%d'),
-                    "genero": reciclador.genero,
-                    "cedula": reciclador.cedula,
-                    "calificacion_reciclador": reciclador.calificacion_reciclador,
-                    "nacionalidad": reciclador.nacionalidad,
-                    "telefono": reciclador.telefono,
-                    # Agrega más campos según sea necesario
-                }
-                recicladores_data.append(reciclador_info)
+                fec_nac_str = reciclador.fec_nac.strftime('%Y-%m-%d')
+                fec_nac = datetime.strptime(fec_nac_str, '%Y-%m-%d')
+                fecha_actual = datetime.now();
 
-            return JsonResponse({"recicladores": recicladores_data})
+                # Llama a la segunda vista con un HttpRequest válido
+                usuario_request = HttpRequest()
+                usuario_request.method = "POST"  # Establece el método como POST
+                usuario_request._body = json.dumps({"id_usuario": reciclador.id_usuario}).encode('utf-8')  # Crea el cuerpo de la solicitud
+                respuesta_segunda_vista = obtenerInformacionUsuario(usuario_request)
+                data = json.loads(respuesta_segunda_vista.content.decode('utf-8'))
+
+                if data.get("success"):
+                    reciclador_info = {
+                        "id_usuario": reciclador.id_usuario,
+                        "id_reciclador": reciclador.id_reciclador,
+                        "nombres": reciclador.nombres,
+                        "apellidos": reciclador.apellidos,
+                        "nombre_corto": f"{reciclador.nombres.split()[0]} {reciclador.apellidos.split()[0]}",
+                        "correo": reciclador.correo,
+                        "estado_reciclador": reciclador.estado_reciclador,
+                        "provincia": reciclador.provincia,
+                        "ciudad": reciclador.ciudad,
+                        "direccion_corta": f"{reciclador.provincia.lower().capitalize()}, {reciclador.ciudad.lower().capitalize()}",
+                        "direccion": reciclador.direccion,
+                        "fec_nac": fec_nac_str,
+                        "edad": fecha_actual.year - fec_nac.year - ((fecha_actual.month, fecha_actual.day) < (fec_nac.month, fec_nac.day)),
+                        "genero": reciclador.genero,
+                        "cedula": reciclador.cedula,
+                        "calificacion_reciclador": reciclador.calificacion_reciclador,
+                        "nacionalidad": reciclador.nacionalidad,
+                        "telefono": reciclador.telefono,
+                        "url_foto": reciclador.url_foto,
+                        "perfil": data.get("data")
+                        # Agrega más campos según sea necesario
+                    }
+                    recicladores_data.append(reciclador_info)
+
+            return JsonResponse({"data": recicladores_data, "success": True})
 
         else:
             return JsonResponse({"error": "Método no permitido"})
@@ -900,7 +1021,7 @@ def actualizacionDeCampos(request):
                 # Manejar caso de rol desconocido
                 return JsonResponse({"error": "Rol de usuario desconocido"})
 
-            return JsonResponse({"message": "Datos actualizados correctamente"})
+            return JsonResponse({"message": "Datos actualizados correctamente", "success": True}, safe=False)
         except Exception as e:
             # Manejar la excepción
             return JsonResponse({"error": str(e)})
@@ -910,20 +1031,207 @@ def actualizacionDeCampos(request):
 
 def obtener_territorios(request):
     try:
-        territorios = Territorio.objects.annotate(
-            id=Value("id", output_field=CharField()),
-            id_nivel_territorial=Value("id_nivel_territorial", output_field=CharField()),
-            id_territorio_padre=Value("id_territorio_padre", output_field=CharField()),
-            descripcion=Replace('descripcion', '\t', ''),  # Remover caracteres de tabulación
-            codigo=Value("codigo", output_field=CharField())
-        ).values('id', 'id_nivel_territorial', 'id_territorio_padre', 'descripcion', 'codigo')
+        territorios = Territorio.objects.values('id_territorio', 'id_nivel_territorial', 'id_territorio_padre', 'descripcion', 'codigo')
 
         territorios_json = list(territorios)
 
-        return JsonResponse(territorios_json, safe=False)
+        return JsonResponse({"data": territorios_json, "success": True}, safe=False)
 
     except Exception as e:
         return JsonResponse({"error": f"Ocurrió un error al procesar la solicitud: {str(e)}"}, charset='utf-8')
+
+
+def actualizar_estado_reciclador(request):
+    if request.method == "POST":
+        body_unicode = request.body.decode('utf-8')
+        body_data = json.loads(body_unicode)
+
+        id_reciclador = body_data.get("id_reciclador")
+        nuevo_estado = body_data.get("nuevo_estado")
+
+        try:
+            reciclador = Reciclador.objects.get(id_reciclador=id_reciclador)
+            if nuevo_estado == "I":
+                reciclador.estado_reciclador = nuevo_estado
+                reciclador.id_empresa = None  # Eliminar id_empresa cuando el estado es inactivo
+            else:
+                reciclador.estado_reciclador = nuevo_estado
+            reciclador.save()
+
+            return JsonResponse({"message": "Estado de reciclador actualizado correctamente", "success": True})
+        except Reciclador.DoesNotExist:
+            return JsonResponse({"error": "Reciclador no encontrado"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)})
+    else:
+        return JsonResponse({"error": "Método no permitido"})
+
+def crear_tipo_material(request):
+    try:
+        if request.method == "POST":
+            body_unicode = request.body.decode('utf-8')
+            body_data = json.loads(body_unicode)
+
+            # Extraer datos del cuerpo de la solicitud
+            descripcion = body_data.get("descripcion")
+
+            # Verificar si la descripción del tipo de material ya existe
+            if TipoMaterial.objects.filter(descripcion=descripcion).exists():
+                return JsonResponse({"error": "La descripción del tipo de material ya existe"}, charset='utf-8')
+
+            # Crear un nuevo objeto de TipoMaterial
+            tipo_material = TipoMaterial(descripcion=descripcion)
+
+            # Guardar el tipo de material en la base de datos
+            tipo_material.save()
+
+            return JsonResponse({"success": True, "message": "Tipo de material creado exitosamente"}, charset='utf-8')
+
+        else:
+            return JsonResponse({"error": "Método no permitido"}, charset='utf-8')
+
+    except Exception as e:
+        # Imprimir detalles de la excepción
+        print(f"Error al crear el tipo de material: {str(e)}")
+
+        # Devolver un error más informativo
+        return JsonResponse({"error": f"Ocurrió un error al procesar la solicitud: {str(e)}"}, charset='utf-8')
+
+
+def tipos_materiales_activos(request):
+    try:
+        if request.method == "GET":
+            # Obtener tipos de materiales activos
+            tipos_activos = TipoMaterial.objects.filter(estado='A').values('descripcion', 'id_tipo_material')
+
+            # Crear la lista de diccionarios con formato label:value
+            tipos_list = [{'label': tipo['descripcion'], 'value': tipo['id_tipo_material']} for tipo in tipos_activos]
+
+            # Retornar la lista de tipos de materiales activos
+            return JsonResponse({"data":tipos_list, "success": True}, safe=False)
+
+
+        else:
+            # Método no permitido
+            return JsonResponse({"error": "Método no permitido"})
+    except Exception as e:
+        # Manejar errores
+        return JsonResponse({"error": f"Ocurrió un error al procesar la solicitud: {str(e)}"})
+
+def ingresar_registro_reciclaje(request):
+    if request.method == "POST":
+        body_unicode = request.body.decode('utf-8')
+        body_data = json.loads(body_unicode)
+
+        id_material = body_data.get("id_material")
+        peso = body_data.get("peso")
+        id_usuario_registro = body_data.get("id_usuario_registro")
+        id_reciclador = body_data.get("id_reciclador")
+
+        try:
+            material = TipoMaterial.objects.get(id_tipo_material=id_material)
+            reciclador = Reciclador.objects.get(id_reciclador=id_reciclador)
+            usuario_registro = Usuario.objects.get(id_usuario=id_usuario_registro)
+
+            registro_reciclaje = RegistroReciclaje(
+                id_material=material,
+                peso=peso,
+                id_usuario_ingreso=usuario_registro,
+                id_reciclador=reciclador,
+                id_usuario_modificacion=usuario_registro
+            )
+
+            registro_reciclaje.save()
+
+            return JsonResponse({"success": True, "message": "Registro de reciclaje ingresado correctamente"})
+        except TipoMaterial.DoesNotExist:
+            return JsonResponse({"error": "El tipo de material especificado no existe"})
+        except Reciclador.DoesNotExist:
+            return JsonResponse({"error": "El reciclador especificado no existe"})
+        except Usuario.DoesNotExist:
+            return JsonResponse({"error": "El usuario especificado no existe"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)})
+    else:
+        return JsonResponse({"error": "Método no permitido"})
+
+
+def actualizar_registro_reciclaje(request):
+    if request.method == "POST":
+        body_unicode = request.body.decode('utf-8')
+        body_data = json.loads(body_unicode)
+
+        id_registro = body_data.get("id_registro")
+        id_material = body_data.get("id_material")
+        peso = body_data.get("peso")
+        id_usuario_modificacion = body_data.get("id_usuario_modificacion")
+        estado = body_data.get("estado")
+
+        try:
+            registro = RegistroReciclaje.objects.get(id_registro=id_registro)
+            # Actualizar los campos solicitados
+            print("material", id_material, registro.id_material)
+            if id_material!=None:
+                registro.id_material = TipoMaterial.objects.get(id_tipo_material=id_material)
+            if peso!=None:
+                registro.peso = peso
+            registro.id_usuario_modificacion = Usuario.objects.get(id_usuario=id_usuario_modificacion)
+            registro.estado = estado
+            # Guardar la fecha de modificación (la fecha_ingreso permanece igual)
+            registro.save(update_fields=['id_material', 'peso', 'id_usuario_modificacion', 'estado', 'fecha_modificacion'])
+            return JsonResponse({"message": "Registro de reciclaje actualizado correctamente", "success": True})
+        except RegistroReciclaje.DoesNotExist:
+            return JsonResponse({"error": "Registro de reciclaje no encontrado"})
+        except TipoMaterial.DoesNotExist:
+            return JsonResponse({"error": "Tipo de material no encontrado"})
+        except Usuario.DoesNotExist:
+            return JsonResponse({"error": "Usuario no encontrado"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)})
+    else:
+        return JsonResponse({"error": "Método no permitido"})
+
+def obtener_registro_reciclaje(request):
+    if request.method == "POST":
+        body_data = json.loads(request.body)
+
+        id_reciclador = body_data.get("id_reciclador")
+
+        try:
+            reciclador = Reciclador.objects.get(id_reciclador=id_reciclador)
+            registros = RegistroReciclaje.objects.filter(id_reciclador=reciclador, estado='A')
+
+            registros_list = []
+            for registro in registros:
+                material = TipoMaterial.objects.get(id_tipo_material=registro.id_material_id)
+                usuario_registro = Usuario.objects.get(id_usuario=registro.id_usuario_ingreso_id)
+
+                if hasattr(usuario_registro, 'usuarioempresa'):
+                    nombre_corto = f"{usuario_registro.usuarioempresa.razon_social}"
+                else:
+                    nombre_corto = f"{usuario_registro.usuariopersona.nombres.split()[0]} {usuario_registro.usuariopersona.apellidos.split()[0]}"
+
+                registros_list.append({
+                    "id_registro": registro.id_registro,
+                    "material": material.descripcion,
+                    "peso": registro.peso,
+                    "usuario_registro": nombre_corto,
+                    "fecha_registro": registro.fecha_ingreso.strftime('%Y-%m-%d')
+                })
+
+            return JsonResponse({"data":registros_list, "success": True}, safe=False)
+        except Reciclador.DoesNotExist:
+            return JsonResponse({"error": "No se encontró el reciclador"})
+        except RegistroReciclaje.DoesNotExist:
+            return JsonResponse({"error": "No se encontraron registros de reciclaje para este reciclador"})
+        except TipoMaterial.DoesNotExist:
+            return JsonResponse({"error": "No se encontró información del material"})
+        except UsuarioPersona.DoesNotExist:
+            return JsonResponse({"error": "No se encontró información del usuario persona"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)})
+    else:
+        return JsonResponse({"error": "Método no permitido"})
 
 '''
 
