@@ -8,9 +8,18 @@ https://docs.djangoproject.com/en/4.2/howto/deployment/asgi/
 """
 
 import os
-
 from django.core.asgi import get_asgi_application
+from channels.routing import ProtocolTypeRouter, URLRouter
+from channels.auth import AuthMiddlewareStack
+from myapp import routing  # Importa el archivo de enrutamiento de tu app
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'app_reciclaje.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'myproject.settings')
 
-application = get_asgi_application()
+application = ProtocolTypeRouter({
+    "http": get_asgi_application(),
+    "websocket": AuthMiddlewareStack(
+        URLRouter(
+            routing.websocket_urlpatterns
+        )
+    ),
+})

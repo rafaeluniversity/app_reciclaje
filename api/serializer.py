@@ -3,7 +3,10 @@ from .models import (
     Roles, Usuario, UsuarioPersona, UsuarioEmpresa,
     RelacionEmpresa, Reciclador, Calificacion, Archivo,
     CarnetRecolectores, SolicitudRecoleccion, ArchivosSolicitudes,
-    ReporteDenuncias, ArchivosReportes, Imagen)
+    ReporteDenuncias, ArchivosReportes, Imagen,
+    CarruselFoto, QuienesSomos, Seccion,
+    Parrafo, Timeline, PasosTimeline,
+    CentroAcopio, SolicitudDetalle, TipoMaterial)
 
 class ImagenSerializer(serializers.ModelSerializer):
     class Meta:
@@ -74,3 +77,68 @@ class ArchivosReportesSerializer(serializers.ModelSerializer):
     class Meta:
         model = ArchivosReportes
         fields = '__all__'
+
+class CarruselFotoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CarruselFoto
+        fields = '__all__'
+
+class QuienesSomosSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = QuienesSomos
+        fields = '__all__'
+
+class SeccionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Seccion
+        fields = '__all__'
+
+class ParrafoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Parrafo
+        fields = '__all__'
+
+class TimelineSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Timeline
+        fields = '__all__'
+
+class PasosTimelineSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PasosTimeline
+        fields = '__all__'
+
+class CentroAcopioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CentroAcopio
+        fields = '__all__'
+
+
+class SolicitudDetalleSerializer(serializers.ModelSerializer):
+    fotos = ImagenSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = SolicitudDetalle
+        fields = ('id_solicitud', 'materiales', 'direccion', 'ubicacion', 'calificado', 'fotos')
+
+class CrearSolicitudSerializer(serializers.Serializer):
+    materiales = serializers.ListField(
+        child=serializers.CharField(),
+        allow_empty=False
+    )
+    direccion = serializers.CharField(max_length=255)
+    ubicacion = serializers.ListField(
+        child=serializers.FloatField(),
+        allow_empty=False,
+        min_length=2,
+        max_length=2
+    )
+    fotos = serializers.ListField(
+        child=serializers.ImageField(),
+        required=False
+    )
+
+    def validate_materiales(self, value):
+        if not all(TipoMaterial.objects.filter(descripcion=material).exists() for material in value):
+            raise serializers.ValidationError("Algunos materiales no son válidos.")
+        return value

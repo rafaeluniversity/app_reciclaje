@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'api',
     'corsheaders',
+    'channels',
 ]
 
 MIDDLEWARE = [
@@ -79,6 +80,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'app_reciclaje.wsgi.application'
 
+ASGI_APPLICATION = 'app_reciclaje.asgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
@@ -155,3 +157,8 @@ REST_FRAMEWORK = {
 CORS_ALLOWED_ORIGINS = [
     "https://localost:3000",  # O el puerto en el que se ejecute tu aplicación React
 ]
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}

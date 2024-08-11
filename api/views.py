@@ -5,10 +5,15 @@ from django.http import JsonResponse
 import json
 from django.contrib.auth.hashers import check_password, make_password
 from datetime import datetime
+from django.utils import timezone
+from django.http import HttpRequest
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
 from django.db.models import Value, CharField
 from django.db.models.functions import Concat
 from django.db.models.functions import Replace
-from django.http import HttpRequest
 from django.shortcuts import get_object_or_404
 
 from .serializer import (
@@ -25,7 +30,15 @@ from .serializer import (
     ArchivosSolicitudesSerializer,
     ReporteDenunciasSerializer,
     ArchivosReportesSerializer,
-    ImagenSerializer
+    ImagenSerializer,
+    CarruselFotoSerializer,
+    QuienesSomosSerializer,
+    SeccionSerializer,
+    ParrafoSerializer,
+    TimelineSerializer,
+    PasosTimelineSerializer,
+    CentroAcopioSerializer,
+    SolicitudDetalleSerializer
 )
 
 from .models import (
@@ -45,8 +58,44 @@ from .models import (
     Territorio,
     Imagen,
     TipoMaterial,
-    RegistroReciclaje
+    RegistroReciclaje,
+    CarruselFoto,
+    QuienesSomos,
+    Seccion,
+    Parrafo,
+    Timeline,
+    PasosTimeline,
+    CentroAcopio,
+    SolicitudDetalle
 )
+
+class CentroAcopioViewSet(viewsets.ModelViewSet):
+    queryset = CentroAcopio.objects.all()
+    serializer_class = CentroAcopioSerializer
+
+class CarruselFotoViewSet(viewsets.ModelViewSet):
+    queryset = CarruselFoto.objects.all()
+    serializer_class = CarruselFotoSerializer
+
+class QuienesSomosViewSet(viewsets.ModelViewSet):
+    queryset = QuienesSomos.objects.all()
+    serializer_class = QuienesSomosSerializer
+
+class SeccionViewSet(viewsets.ModelViewSet):
+    queryset = Seccion.objects.all()
+    serializer_class = SeccionSerializer
+
+class ParrafoViewSet(viewsets.ModelViewSet):
+    queryset = Parrafo.objects.all()
+    serializer_class = ParrafoSerializer
+
+class TimelineViewSet(viewsets.ModelViewSet):
+    queryset = Timeline.objects.all()
+    serializer_class = TimelineSerializer
+
+class PasosTimelineViewSet(viewsets.ModelViewSet):
+    queryset = PasosTimeline.objects.all()
+    serializer_class = PasosTimelineSerializer
 
 class ImagenViewSet(viewsets.ModelViewSet):
     queryset = Imagen.objects.all()
@@ -103,6 +152,10 @@ class ReporteDenunciasViewSet(viewsets.ModelViewSet):
 class ArchivosReportesViewSet(viewsets.ModelViewSet):
     queryset = ArchivosReportes.objects.all()
     serializer_class = ArchivosReportesSerializer
+
+class SolicitudDetalleViewSet(viewsets.ModelViewSet):
+    queryset = SolicitudDetalle.objects.all()
+    serializer_class = SolicitudDetalleSerializer
 """
 def guardar_imagen(request):
     try:
@@ -1233,6 +1286,220 @@ def obtener_registro_reciclaje(request):
     else:
         return JsonResponse({"error": "Método no permitido"})
 
+
+
+def obtener_datos_inicio(request):
+    if request.method == "GET":
+        try:
+            # Obtener datos del carrusel de fotos
+            carrusel_data = list(CarruselFoto.objects.filter(estado='A').values('id', 'title', 'content', 'imageURL', 'orden'))
+
+            # Obtener datos de quienes somos
+            quienes_somos_data = list(QuienesSomos.objects.filter(estado='A').values('id', 'orden', 'title', 'content', 'imageURL'))
+
+            # Obtener datos de las secciones con sus párrafos y timeline
+            secciones_data = []
+            secciones = Seccion.objects.filter(estado='A')
+
+            for seccion in secciones:
+                seccion_info = {
+                    'id': seccion.id,
+                    'orden': seccion.orden,
+                    'title': seccion.title,
+                    'imageURL': seccion.imageURL,
+                    'content': []
+                }
+
+                # Obtener párrafos de la sección
+                parrafos = Parrafo.objects.filter(seccion=seccion, estado='A').order_by('orden')
+                for parrafo in parrafos:
+                    parrafo_info = {
+                        'id': parrafo.id,
+                        'orden': parrafo.orden,
+                        'tipo': 'parrafo',
+                        'title': parrafo.title,
+                        'content': parrafo.content,
+                        'imageURL': parrafo.imageURL
+                    }
+                    seccion_info['content'].append(parrafo_info)
+
+                # Obtener timeline de la sección
+                timeline = Timeline.objects.filter(seccion=seccion, estado='A').first()
+                if timeline:
+                    timeline_info = {
+                        'id': timeline.id,
+                        'orden': timeline.orden,
+                        'title': timeline.title,
+                        'tipo': 'timeline',
+                        'childs': []
+                    }
+                    pasos = PasosTimeline.objects.filter(timeline=timeline, estado='A').order_by('numero')
+                    for paso in pasos:
+                        paso_info = {
+                            'id': paso.id,
+                            'numero': paso.numero,
+                            'title': paso.title,
+                            'content': paso.content
+                        }
+                        timeline_info['childs'].append(paso_info)
+
+                    seccion_info['content'].append(timeline_info)
+
+                secciones_data.append(seccion_info)
+
+            # Obtener datos de los centros de acopio
+            centros_acopio_data = list(CentroAcopio.objects.filter(estado='A').values(
+                'id', 'organizacion__razon_social', 'nombre_acopio', 'lat', 'lon', 'referencia', 'imageURL'))
+
+            # Renombrar el campo organizacion__razon_social a nombre_organizacion
+            for centro in centros_acopio_data:
+                centro['nombre_organizacion'] = centro.pop('organizacion__razon_social')
+
+            data = {
+                'carrusel': carrusel_data,
+                'quienes_somos': quienes_somos_data,
+                'secciones': secciones_data,
+                'centros_acopio': centros_acopio_data
+            }
+
+            return JsonResponse({"data": data, "success": True})
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)})
+    else:
+        return JsonResponse({"error": "Método no permitido"})
+'''
+def crear_solicitud(request):
+    if request.method == "POST":
+        try:
+            body_data = json.loads(request.body)
+            id_usuario = body_data.get("id_usuario")
+            materiales = body_data.get("materiales", [])
+            direccion = body_data.get("direccion")
+            ubicacion = body_data.get("ubicacion", [0, 0])
+            fotos = body_data.get("fotos", [])
+
+            try:
+                usuario = UsuarioPersona.objects.get(id_usuario=id_usuario)
+            except UsuarioPersona.DoesNotExist:
+                return JsonResponse({"error": "Usuario no encontrado"})
+
+            solicitud = SolicitudRecoleccion(
+                id_usuario=usuario,
+                estado='P',
+                fecha_inicio=timezone.now()
+            )
+            solicitud.save()
+
+            solicitud_detalle = SolicitudDetalle(
+                id_solicitud=solicitud,
+                materiales=','.join(materiales),
+                direccion=direccion,
+                ubicacion=json.dumps(ubicacion),  # Cambiar a JSON para el campo de ubicación
+                calificado=False
+            )
+            solicitud_detalle.save()
+
+            for foto_data in fotos:
+                imagen = Imagen(imagen=foto_data)
+                imagen.save()
+                solicitud_detalle.fotos.add(imagen)
+
+            solicitud_detalle.save()
+
+            # Enviar mensaje a los clientes WebSocket
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                'solicitudes_pendientes',
+                {
+                    'type': 'nuevo_solicitud',
+                    'data': {
+                        "id_solicitud": solicitud.id_solicitud,
+                        "materiales": materiales,
+                        "direccion": direccion,
+                        "ubicacion": ubicacion,
+                        "fotos": [foto_data for foto_data in fotos]
+                    }
+                }
+            )
+
+            return JsonResponse({"success": True, "solicitud_id": solicitud.id_solicitud})
+        except Exception as e:
+            return JsonResponse({"error": str(e)})
+    else:
+        return JsonResponse({"error": "Método no permitido"})
+'''
+def crear_solicitud(request):
+    if request.method == "POST":
+        try:
+            # Los datos que no son archivos ahora se encuentran en request.POST
+            id_usuario = request.POST.get("id_usuario")
+            materiales = request.POST.get("materiales")
+            direccion = request.POST.get("direccion")
+            ubicacion = request.POST.get("ubicacion")  # Se recibe como string, luego se decodifica
+            fotos = request.FILES.getlist("fotos[]")  # Obtiene todos los archivos enviados
+
+            ubicacion = json.loads(ubicacion)  # Convertir de string JSON a lista si es necesario
+
+            try:
+                usuario = UsuarioPersona.objects.get(id_usuario=id_usuario)
+            except UsuarioPersona.DoesNotExist:
+                return JsonResponse({"error": "Usuario no encontrado"})
+
+            # Crear la solicitud
+            solicitud = SolicitudRecoleccion(
+                id_usuario=usuario,
+                estado='P',
+                fecha_inicio=timezone.now()
+            )
+            solicitud.save()
+
+            # Crear el detalle de la solicitud
+            solicitud_detalle = SolicitudDetalle(
+                id_solicitud=solicitud,
+                materiales=materiales,
+                direccion=direccion,
+                ubicacion=ubicacion,
+                calificado=False
+            )
+            solicitud_detalle.save()
+
+            # Guardar las imágenes y generar las URLs
+            fotos_urls = []
+            for foto_data in fotos:
+                imagen = Imagen(imagen=foto_data)
+                imagen.save()
+
+                # Construir la URL completa
+                foto_url = request.build_absolute_uri(imagen.imagen.url)
+                fotos_urls.append(foto_url)
+
+                # Añadir la imagen al detalle de la solicitud
+                solicitud_detalle.fotos.add(imagen)
+
+            solicitud_detalle.save()
+
+            # Enviar mensaje a los clientes WebSocket
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                'solicitudes_pendientes',
+                {
+                    'type': 'nuevo_solicitud',
+                    'data': {
+                        "id_solicitud": solicitud.id_solicitud,
+                        "materiales": materiales,
+                        "direccion": direccion,
+                        "ubicacion": ubicacion,
+                        "fotos": fotos_urls  # Enviar las URLs de las fotos
+                    }
+                }
+            )
+            print(fotos_urls)
+            return JsonResponse({"success": True, "solicitud_id": fotos_urls})
+        except Exception as e:
+            return JsonResponse({"error": str(e)})
+    else:
+        return JsonResponse({"error": "Método no permitido"})
 '''
 
 def logout_view(request):

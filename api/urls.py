@@ -17,7 +17,14 @@ router.register(r'archivos-solicitudes', views.ArchivosSolicitudesViewSet)
 router.register(r'reportes-denuncias', views.ReporteDenunciasViewSet)
 router.register(r'archivos-reportes', views.ArchivosReportesViewSet)
 router.register(r'imagenes', views.ImagenViewSet)
-
+router.register(r'carrusel-fotos', views.CarruselFotoViewSet, basename='carrusel-fotos')
+router.register(r'quienes-somos', views.QuienesSomosViewSet, basename='quienes-somos')
+router.register(r'secciones', views.SeccionViewSet, basename='secciones')
+router.register(r'parrafos', views.ParrafoViewSet, basename='parrafos')
+router.register(r'timelines', views.TimelineViewSet, basename='timelines')
+router.register(r'pasos-timeline', views.PasosTimelineViewSet, basename='pasos-timeline')
+router.register(r'centros-acopio', views.CentroAcopioViewSet, basename='centros-acopio')
+router.register(r'solicitud-detalle', views.SolicitudDetalleViewSet, basename='solicitud-detalle')
 
 urlpatterns = [
     path('', include(router.urls))

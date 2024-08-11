@@ -1,5 +1,6 @@
 from django.db import models
 from django.db.models import JSONField
+from django.core.exceptions import ValidationError
 # Create your models here.
 
 class Imagen(models.Model):
@@ -187,6 +188,30 @@ class SolicitudRecoleccion(models.Model):
     def __str__(self):
         return f"Solicitud {self.id_solicitud} - Estado: {self.get_estado_display()}"
 
+class SolicitudDetalle(models.Model):
+    id_solicitud = models.OneToOneField(SolicitudRecoleccion, on_delete=models.CASCADE, primary_key=True)
+    materiales = models.TextField(help_text="Lista de materiales separados por comas")
+    direccion = models.CharField(max_length=255, help_text="Dirección del solicitante")
+    ubicacion = models.JSONField(help_text="Ubicación como lista [latitud, longitud]")
+    calificado = models.BooleanField(default=False)
+    fotos = models.ManyToManyField(Imagen, related_name='solicitudes', blank=True)
+
+    def __str__(self):
+        return f"SolicitudDetalle {self.id_solicitud_id}"
+
+    def save(self, *args, **kwargs):
+        # Validar que los materiales existan en el modelo TipoMaterial
+        lista_materiales = self.materiales.split(', ')
+
+        materiales_validos = TipoMaterial.objects.filter(descripcion__in=lista_materiales).count()
+
+        print(materiales_validos)
+        '''
+        if materiales_validos != len(lista_materiales):
+            raise ValidationError("Uno o más materiales no son válidos.")
+        '''
+        super(SolicitudDetalle, self).save(*args, **kwargs)
+
 class ArchivosSolicitudes(models.Model):
     id_archivo_solicitud = models.BigAutoField(primary_key=True)
     archivo = models.ForeignKey(Archivo, on_delete=models.CASCADE)
@@ -249,3 +274,81 @@ class RegistroReciclaje(models.Model):
 
     def __str__(self):
         return f"RegistroReciclaje {self.id_registro} - Reciclador: {self.id_reciclador}, Material: {self.id_material}, Peso: {self.peso}kg, Estado: {self.estado}"
+
+#---------------------
+#modelos para el inicio
+
+class CarruselFoto(models.Model):
+    title = models.CharField(max_length=50)
+    content = models.TextField()
+    imageURL = models.URLField(max_length=200)
+    orden = models.IntegerField()
+    estado = models.CharField(max_length=10, choices=[('A', 'Activo'), ('I', 'Inactivo')])
+
+    def __str__(self):
+        return f"{self.title} - Orden: {self.orden}"
+
+class QuienesSomos(models.Model):
+    title = models.CharField(max_length=50)
+    content = models.CharField(max_length=350)
+    imageURL = models.URLField(max_length=200)
+    orden = models.IntegerField()
+    estado = models.CharField(max_length=10, choices=[('A', 'Activo'), ('I', 'Inactivo')])
+
+    def __str__(self):
+        return f"{self.title} - Orden: {self.orden}"
+
+class Seccion(models.Model):
+    title = models.CharField(max_length=50)
+    imageURL = models.URLField(max_length=200)
+    orden = models.IntegerField()
+    estado = models.CharField(max_length=10, choices=[('A', 'Activo'), ('I', 'Inactivo')])
+
+    def __str__(self):
+        return self.title
+
+class Parrafo(models.Model):
+    seccion = models.ForeignKey(Seccion, related_name='parrafos', on_delete=models.CASCADE)
+    title = models.CharField(max_length=50)
+    content = models.TextField()
+    imageURL = models.URLField(max_length=200)
+    orden = models.IntegerField()
+    estado = models.CharField(max_length=10, choices=[('A', 'Activo'), ('I', 'Inactivo')])
+
+    def __str__(self):
+        return f"{self.title} - Sección: {self.seccion.title}"
+
+class Timeline(models.Model):
+    seccion = models.ForeignKey(Seccion, related_name='timelines', on_delete=models.CASCADE)
+    title = models.CharField(max_length=50)
+    orden = models.IntegerField()
+    estado = models.CharField(max_length=10, choices=[('A', 'Activo'), ('I', 'Inactivo')])
+
+    def __str__(self):
+        return f"{self.title} - Sección: {self.seccion.title}"
+
+class PasosTimeline(models.Model):
+    timeline = models.ForeignKey(Timeline, related_name='pasos', on_delete=models.CASCADE)
+    title = models.CharField(max_length=50)
+    content = models.TextField()
+    numero = models.IntegerField()
+    estado = models.CharField(max_length=10, choices=[('A', 'Activo'), ('I', 'Inactivo')])
+
+    def __str__(self):
+        return f"{self.title} - Timeline: {self.timeline.title}"
+
+    def clean(self):
+        # Validar que el número de paso sea único dentro del mismo timeline
+        if PasosTimeline.objects.filter(timeline=self.timeline, numero=self.numero).exists():
+            raise ValidationError({'numero': 'El número de paso debe ser único dentro del timeline.'})
+
+class CentroAcopio(models.Model):
+    organizacion = models.ForeignKey(UsuarioEmpresa, related_name='centros_acopio', on_delete=models.CASCADE)
+    nombre_acopio = models.CharField(max_length=100)
+    ubicacion = models.JSONField(help_text="Ubicación como lista [latitud, longitud]")
+    referencia = models.TextField()
+    imageURL = models.URLField(max_length=200)
+    estado = models.CharField(max_length=10, choices=[('A', 'Activo'), ('I', 'Inactivo')])
+
+    def __str__(self):
+        return f"{self.nombre_acopio} - {self.organizacion.razon_social}"
