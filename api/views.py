@@ -7,14 +7,25 @@ from django.contrib.auth.hashers import check_password, make_password
 from datetime import datetime
 from django.utils import timezone
 from django.http import HttpRequest
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
+#from channels.layers import get_channel_layer
+import pusher
+#from asgiref.sync import async_to_sync
+from django.conf import settings
 
-from django.db.models import Value, CharField
-from django.db.models.functions import Concat
-from django.db.models.functions import Replace
-from django.shortcuts import get_object_or_404
+
+#from django.db.models import Value, CharField
+#from django.db.models.functions import Concat
+#from django.db.models.functions import Replace
+#from django.shortcuts import get_object_or_404
+
+
+# Configuración del cliente de Pusher
+pusher_client = pusher.Pusher(
+    app_id = "1848510",
+    key = "390cef738b8ca03faacd",
+    secret = "c5cef2030db2b7a4ae63",
+    cluster = "sa1"
+)
 
 from .serializer import (
     RolesSerializer,
@@ -156,36 +167,7 @@ class ArchivosReportesViewSet(viewsets.ModelViewSet):
 class SolicitudDetalleViewSet(viewsets.ModelViewSet):
     queryset = SolicitudDetalle.objects.all()
     serializer_class = SolicitudDetalleSerializer
-"""
-def guardar_imagen(request):
-    try:
-        if request.method == "POST":
-            # Decodificar y cargar los datos del cuerpo de la solicitud JSON
-            body_unicode = request.body.decode('utf-8')
-            body_data = json.loads(body_unicode)
 
-            # Extraer datos del cuerpo de la solicitud
-            imagen_data = body_data.get("imagen")
-
-            # Crear un nuevo objeto de Imagen
-            imagen = Imagen(imagen=imagen_data)
-
-            # Guardar el objeto en la base de datos
-            imagen.save()
-
-            # Retornar el ID y la URL de la imagen creada
-            return JsonResponse({"id_imagen": imagen.id_imagen, "url_imagen": imagen.get_image_url()}, charset='utf-8')
-
-        else:
-            return JsonResponse({"error": "Método no permitido"}, charset='utf-8')
-
-    except Exception as e:
-        # Imprimir detalles de la excepción
-        print(f"Error al guardar la imagen: {str(e)}")
-
-        # Devolver un error más informativo
-        return JsonResponse({"error": f"Ocurrió un error al procesar la solicitud: {str(e)}"}, charset='utf-8')
-"""
 
 def enviar_solicitud(request):
     if request.method == "POST":
@@ -1432,19 +1414,24 @@ def crear_solicitud(request):
 def crear_solicitud(request):
     if request.method == "POST":
         try:
-            # Los datos que no son archivos ahora se encuentran en request.POST
+            # Validar que todos los campos requeridos están presentes
             id_usuario = request.POST.get("id_usuario")
             materiales = request.POST.get("materiales")
             direccion = request.POST.get("direccion")
-            ubicacion = request.POST.get("ubicacion")  # Se recibe como string, luego se decodifica
-            fotos = request.FILES.getlist("fotos[]")  # Obtiene todos los archivos enviados
+            ubicacion = request.POST.get("ubicacion")
+            fotos = request.FILES.getlist("fotos[]")
 
-            ubicacion = json.loads(ubicacion)  # Convertir de string JSON a lista si es necesario
+            if not all([id_usuario, materiales, direccion, ubicacion]):
+                return JsonResponse({"error": "Todos los campos son requeridos."})
 
+            # Convertir la ubicación a una lista si es necesario
+            ubicacion = json.loads(ubicacion)
+
+            # Validar que el usuario existe
             try:
                 usuario = UsuarioPersona.objects.get(id_usuario=id_usuario)
             except UsuarioPersona.DoesNotExist:
-                return JsonResponse({"error": "Usuario no encontrado"})
+                return JsonResponse({"error": "Usuario no encontrado."})
 
             # Crear la solicitud
             solicitud = SolicitudRecoleccion(
@@ -1479,27 +1466,52 @@ def crear_solicitud(request):
 
             solicitud_detalle.save()
 
-            # Enviar mensaje a los clientes WebSocket
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                'solicitudes_pendientes',
-                {
-                    'type': 'nuevo_solicitud',
-                    'data': {
-                        "id_solicitud": solicitud.id_solicitud,
-                        "materiales": materiales,
-                        "direccion": direccion,
-                        "ubicacion": ubicacion,
-                        "fotos": fotos_urls  # Enviar las URLs de las fotos
-                    }
-                }
-            )
-            print(fotos_urls)
-            return JsonResponse({"success": True, "solicitud_id": fotos_urls})
+            # Enviar mensaje a los clientes a través de Pusher
+            pusher_client.trigger('solicitudes_channel', 'nuevo_solicitud', {
+                'id_solicitud': solicitud.id_solicitud,
+                'materiales': materiales,
+                'direccion': direccion,
+                'ubicacion': ubicacion,
+                'fotos': fotos_urls
+            })
+
+            return JsonResponse({"success": True, "solicitud_id": solicitud.id_solicitud})
+
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "La ubicación proporcionada no es válida."})
         except Exception as e:
             return JsonResponse({"error": str(e)})
     else:
         return JsonResponse({"error": "Método no permitido"})
+
+
+def obtener_solicitudes(request):
+    if request.method == "GET":
+        # Obtener todas las solicitudes
+        solicitudes = SolicitudRecoleccion.objects.all()
+
+        # Crear una lista para almacenar los datos de las solicitudes con sus detalles
+        solicitudes_list = []
+
+        for solicitud in solicitudes:
+            # Obtener el detalle asociado a la solicitud
+            detalle = SolicitudDetalle.objects.filter(id_solicitud=solicitud).first()
+
+            # Preparar la estructura de datos que quieres devolver al frontend
+            solicitud_data = {
+                'id_solicitud': solicitud.id_solicitud,
+                'estado': solicitud.estado,
+                'fecha_inicio': solicitud.fecha_inicio,
+                'materiales': detalle.materiales if detalle else '',
+                'direccion': detalle.direccion if detalle else '',
+                'ubicacion': detalle.ubicacion if detalle else '',
+                'fotos': [imagen.get_image_url() for imagen in detalle.fotos.all()] if detalle else []
+            }
+
+            # Añadir esta solicitud a la lista
+            solicitudes_list.append(solicitud_data)
+
+        return JsonResponse(solicitudes_list, safe=False)
 '''
 
 def logout_view(request):

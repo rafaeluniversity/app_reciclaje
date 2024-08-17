@@ -29,7 +29,7 @@ from api.views import (registroEmpresa, registroPersona,
                        actualizacionDeCampos, obtener_territorios, guardar_imagen,
                        actualizar_estado_reciclador, enviar_solicitud, tipos_materiales_activos,
                        ingresar_registro_reciclaje, crear_tipo_material, actualizar_registro_reciclaje,
-                       obtener_registro_reciclaje, obtener_datos_inicio,crear_solicitud)
+                       obtener_registro_reciclaje, obtener_datos_inicio,crear_solicitud, obtener_solicitudes)
 
 
 urlpatterns = [
@@ -61,5 +61,6 @@ urlpatterns = [
     path('api/v1/obtener_registro_reciclaje/', obtener_registro_reciclaje, name='obtener_registro_reciclaje'),
     path('api/v1/home/', obtener_datos_inicio, name='obtener_datos_home'),
     path('api/crear_solicitud/', crear_solicitud, name='crear_solicitud'),
+    path('api/solicitudes/', obtener_solicitudes, name='obtener_solicitudes'),
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -162,3 +162,10 @@ CHANNEL_LAYERS = {
         'BACKEND': 'channels.layers.InMemoryChannelLayer',
     },
 }
+
+
+PUSHER_APP_ID = '1848510'
+PUSHER_KEY = '390cef738b8ca03faacd'
+PUSHER_SECRET = 'c5cef2030db2b7a4ae63'
+PUSHER_CLUSTER = 'sa1'
+PUSHER_SSL = True  # Asegura que las conexiones sean seguras
