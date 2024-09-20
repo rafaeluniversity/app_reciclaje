@@ -29,7 +29,10 @@ from api.views import (registroEmpresa, registroPersona,
                        actualizacionDeCampos, obtener_territorios, guardar_imagen,
                        actualizar_estado_reciclador, enviar_solicitud, tipos_materiales_activos,
                        ingresar_registro_reciclaje, crear_tipo_material, actualizar_registro_reciclaje,
-                       obtener_registro_reciclaje, obtener_datos_inicio,crear_solicitud, obtener_solicitudes)
+                       obtener_registro_reciclaje, obtener_datos_inicio,crear_solicitud,
+                       rechazar_solicitud,obtener_solicitudes_por_usuario,aceptar_solicitud_y_actualizar_ubicacion,
+                       obtener_ultima_solicitud_pendiente,cancelar_solicitud,confirmar_cancelacion_solicitud,
+                       enviar_correo)
 
 
 urlpatterns = [
@@ -61,6 +64,12 @@ urlpatterns = [
     path('api/v1/obtener_registro_reciclaje/', obtener_registro_reciclaje, name='obtener_registro_reciclaje'),
     path('api/v1/home/', obtener_datos_inicio, name='obtener_datos_home'),
     path('api/crear_solicitud/', crear_solicitud, name='crear_solicitud'),
-    path('api/solicitudes/', obtener_solicitudes, name='obtener_solicitudes'),
+    path('rechazar_solicitud/', rechazar_solicitud, name='rechazar_solicitud'),
+    path('aceptar_solicitud_y_actualizar_ubicacion/', aceptar_solicitud_y_actualizar_ubicacion, name='aceptar_solicitud_y_actualizar_ubicacion'),
+    path('obtener_solicitudes_por_usuario/', obtener_solicitudes_por_usuario, name='obtener_solicitudes_por_usuario'),
+    path('obtener_ultima_solicitud_pendiente/', obtener_ultima_solicitud_pendiente, name='obtener_ultima_solicitud_pendiente'),
+    path('api/v1/cancelar_solicitud/', cancelar_solicitud, name='cancelar_solicitud'),
+    path('api/v1/confirmar_cancelacion_solicitud/', confirmar_cancelacion_solicitud, name='confirmar_cancelacion_solicitud'),
+    path('enviar-correo/', enviar_correo, name='enviar_correo'),
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

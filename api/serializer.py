@@ -6,7 +6,8 @@ from .models import (
     ReporteDenuncias, ArchivosReportes, Imagen,
     CarruselFoto, QuienesSomos, Seccion,
     Parrafo, Timeline, PasosTimeline,
-    CentroAcopio, SolicitudDetalle, TipoMaterial)
+    CentroAcopio, SolicitudDetalle, TipoMaterial,
+    SolicitudesCanceladas)
 
 class ImagenSerializer(serializers.ModelSerializer):
     class Meta:
@@ -113,6 +114,10 @@ class CentroAcopioSerializer(serializers.ModelSerializer):
         model = CentroAcopio
         fields = '__all__'
 
+class SolicitudesCanceladasSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SolicitudesCanceladas
+        fields = '__all__'
 
 class SolicitudDetalleSerializer(serializers.ModelSerializer):
     fotos = ImagenSerializer(many=True, read_only=True)

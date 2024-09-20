@@ -11,13 +11,26 @@ from django.http import HttpRequest
 import pusher
 #from asgiref.sync import async_to_sync
 from django.conf import settings
+from django.db.models import OuterRef, Subquery
+from django.core.mail import send_mail
+from django.template.loader import render_to_string
+from django.utils.crypto import get_random_string
 
-
-#from django.db.models import Value, CharField
-#from django.db.models.functions import Concat
-#from django.db.models.functions import Replace
-#from django.shortcuts import get_object_or_404
-
+def enviar_correo(request):
+    if request.method == "GET":  # Asegúrate de que es una solicitud GET
+        try:
+            send_mail(
+                'Correo de prueba',
+                'Este es un mensaje de prueba enviado desde Django.',
+                'rzambrano2485@utm.edu.ec',  # Reemplaza con tu correo
+                ['rafaelzambranomendoza@gmail.com'],  # Reemplaza con el correo del destinatario
+                fail_silently=False,
+            )
+            return JsonResponse({"success": "Correo de prueba enviado correctamente."})
+        except Exception as e:
+            return JsonResponse({"error": str(e)})
+    else:
+        return JsonResponse({"error": "Método no permitido. Usa GET."})
 
 # Configuración del cliente de Pusher
 pusher_client = pusher.Pusher(
@@ -49,7 +62,8 @@ from .serializer import (
     TimelineSerializer,
     PasosTimelineSerializer,
     CentroAcopioSerializer,
-    SolicitudDetalleSerializer
+    SolicitudDetalleSerializer,
+    SolicitudesCanceladasSerializer
 )
 
 from .models import (
@@ -77,7 +91,9 @@ from .models import (
     Timeline,
     PasosTimeline,
     CentroAcopio,
-    SolicitudDetalle
+    SolicitudDetalle,
+    SolicitudRechazada,
+    SolicitudesCanceladas
 )
 
 class CentroAcopioViewSet(viewsets.ModelViewSet):
@@ -168,6 +184,9 @@ class SolicitudDetalleViewSet(viewsets.ModelViewSet):
     queryset = SolicitudDetalle.objects.all()
     serializer_class = SolicitudDetalleSerializer
 
+class SolicitudesCanceladasViewSet(viewsets.ModelViewSet):
+    queryset = SolicitudesCanceladas.objects.all()
+    serializer_class = SolicitudesCanceladasSerializer
 
 def enviar_solicitud(request):
     if request.method == "POST":
@@ -629,44 +648,47 @@ def agregar_calificacion(request):
             body_data = json.loads(body_unicode)
 
             # Obtener los datos necesarios del cuerpo de la solicitud JSON
-            id_reciclador = body_data.get("id_reciclador")
-            id_usuario = body_data.get("id_usuario")
+            id_usuario_calificador = body_data.get("id_usuario_calificador")
+            id_usuario_calificado = body_data.get("id_usuario_calificado")
             calificacion_nueva = body_data.get("calificacion")
-            observacion = body_data.get("observacion")
+            id_solicitud = body_data.get("id_solicitud")
 
-            # Verificar si el reciclador existe
-            reciclador = Reciclador.objects.get(id_reciclador=id_reciclador)
+            # Validar que los parámetros estén presentes
+            if not id_usuario_calificador or not id_usuario_calificado or not calificacion_nueva or not id_solicitud:
+                return JsonResponse({"error": "Faltan parámetros requeridos."})
 
             # Crear una nueva calificación
             calificacion = Calificacion.objects.create(
-                id_reciclador=reciclador,
-                id_usuario=Usuario.objects.get(id_usuario=id_usuario),
+                id_usuario_calificador=Usuario.objects.get(id_usuario=id_usuario_calificador),
+                id_usuario_calificado=Usuario.objects.get(id_usuario=id_usuario_calificado),
                 calificacion=calificacion_nueva,
-                observacion=observacion
+                id_solicitud=SolicitudRecoleccion.objects.get(id_solicitud=id_solicitud)
             )
 
             calificacion.save()
 
-            # Calcular el promedio de las calificaciones para el reciclador
-            calificaciones_reciclador = Calificacion.objects.filter(id_reciclador=reciclador)
-            promedio_calificaciones = (
-                calificaciones_reciclador.aggregate(promedio=models.Avg('calificacion'))['promedio']
-                if calificaciones_reciclador.exists() else 0
-            )
+            # si el calificador es reciclador
+            try:
+                reciclador = Reciclador.objects.get(id_reciclador=id_usuario_calificador)
 
-            # Actualizar el campo calificacion del reciclador con el promedio
-            reciclador.calificacion = promedio_calificaciones
-            reciclador.save()
+                # Calcular el promedio de las calificaciones para el reciclador
+                calificaciones_reciclador = Calificacion.objects.filter(id_reciclador=reciclador)
+                promedio_calificaciones = (
+                    calificaciones_reciclador.aggregate(promedio=models.Avg('calificacion'))['promedio']
+                    if calificaciones_reciclador.exists() else 0
+                )
+
+                # Actualizar el campo calificacion del reciclador con el promedio
+                reciclador.calificacion = promedio_calificaciones
+                reciclador.save()
+            except Reciclador.DoesNotExist:
+                # El calificador no es un reciclador
+                pass
 
             return JsonResponse({"success": True, "message": "Calificación agregada exitosamente"}, charset='utf-8')
-
         else:
             # Devolver un error si el método de solicitud no es POST
             return JsonResponse({"error": "Método no permitido"}, charset='utf-8')
-
-    except Reciclador.DoesNotExist:
-        # Devolver un error si el reciclador no existe
-        return JsonResponse({"error": "El reciclador no existe"}, charset='utf-8')
 
     except Usuario.DoesNotExist:
         # Devolver un error si el usuario no existe
@@ -911,7 +933,7 @@ def obtenerInformacionUsuario(request):
             return JsonResponse({"error": "Método no permitido"}, charset='utf-8')
 
     except UsuarioPersona.DoesNotExist:
-        return JsonResponse({"error": "El usuario no existe"}, charset='utf-8')
+        return JsonResponse({"error": "El usuario persona no existe"}, charset='utf-8')
 
     except Exception as e:
         # Imprimir detalles de la excepción
@@ -1484,34 +1506,401 @@ def crear_solicitud(request):
     else:
         return JsonResponse({"error": "Método no permitido"})
 
+def aceptar_solicitud_y_actualizar_ubicacion(request):
+    try:
+        data = json.loads(request.body)
+        # Obtener los datos de la solicitud, reciclador y ubicación desde el request
+        id_solicitud = data.get('id_solicitud')
+        id_usuario = data.get('id_usuario')  # Este es el ID del reciclador que es en realidad id_usuario
+        ubicacion_reciclador = data.get('ubicacion_reciclador')
+        estado_solicitud = data.get('estado')
 
-def obtener_solicitudes(request):
-    if request.method == "GET":
-        # Obtener todas las solicitudes
-        solicitudes = SolicitudRecoleccion.objects.all()
+        # Validar que los parámetros estén presentes
+        if not id_solicitud or not id_usuario or not ubicacion_reciclador:
+            return JsonResponse({"error": "Faltan parámetros requeridos."})
+
+        # Obtener la solicitud desde la base de datos
+        try:
+            solicitud = SolicitudRecoleccion.objects.get(id_solicitud=id_solicitud)
+        except SolicitudRecoleccion.DoesNotExist:
+            return JsonResponse({"error": "La solicitud no existe."})
+
+        # Validar que el reciclador existe
+        try:
+            reciclador = Reciclador.objects.get(id_usuario=id_usuario)
+        except Reciclador.DoesNotExist:
+            return JsonResponse({"error": "El reciclador no existe."})
+
+        if not solicitud.id_reciclador:#si no tiene reciclador entonces se asigna
+            solicitud.id_reciclador = reciclador.id_usuario  # Aquí se asigna el id_usuario
+            solicitud.fecha_asig = timezone.now()
+
+        # Actualizar la ubicación del reciclador en el detalle de la solicitud, solo si el estado no es R (Recolectada)
+        solicitud_detalle, created = SolicitudDetalle.objects.get_or_create(id_solicitud=solicitud)
+        if estado_solicitud!="R":
+            solicitud_detalle.ubicacion_reciclador = ubicacion_reciclador
+        solicitud_detalle.save()
+
+        # Actualizar el estado de la solicitud
+        if estado_solicitud != "L":
+            if estado_solicitud == "A":
+                if solicitud.estado not in ["L","R"]:#Evita retroceder de estados L o R
+                    solicitud.estado = estado_solicitud
+            else:
+                solicitud.estado = estado_solicitud
+        elif solicitud.estado not in ["L","R"]:#Si el parametro estado_solicitud es L y el estado actual de solicitud es != L
+            solicitud.estado = estado_solicitud
+            solicitud.fecha_arribo = timezone.now()# fecha y hora a la que llego el reciclador
+
+        solicitud.save()
+
+
+        # Enviar la ubicación a través de Pusher
+        pusher_client.trigger(f'solicitud_{id_solicitud}_channel', 'solicitud_actualizada', {
+            'id_solicitud': id_solicitud,
+            'ubicacion_reciclador': solicitud_detalle.ubicacion_reciclador,
+            'estado': solicitud.estado,
+            'fecha_arribo': solicitud.fecha_arribo.isoformat() if solicitud.fecha_arribo else ''  # Convertir a cadena ISO 8601
+        })
+
+        solicitud_data = {
+            'fecha_arribo': solicitud.fecha_arribo.isoformat() if solicitud.fecha_arribo else '',  # Convertir a cadena ISO 8601
+            'estado': solicitud.estado
+        }
+
+        return JsonResponse({"success": "El estado de la solicitud y la ubicación del reciclador se ha actualizado.","data": solicitud_data})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)})
+
+
+def rechazar_solicitud(request):
+    try:
+        data = json.loads(request.body)
+        # Obtener los datos de la solicitud y el reciclador desde el request
+        id_solicitud = data.get('id_solicitud')
+        id_usuario = data.get('id_usuario')  # Este es el ID del reciclador que es en realidad id_usuario
+
+        # Validar que los parámetros estén presentes
+        if not id_solicitud or not id_usuario:
+            return JsonResponse({"error": "Faltan parámetros requeridos."})
+
+        # Obtener la solicitud y el reciclador desde la base de datos
+        try:
+            solicitud = SolicitudRecoleccion.objects.get(id_solicitud=id_solicitud)
+        except SolicitudRecoleccion.DoesNotExist:
+            return JsonResponse({"error": "La solicitud no existe."})
+
+        try:
+            reciclador = Reciclador.objects.get(id_usuario=id_usuario)
+        except Reciclador.DoesNotExist:
+            return JsonResponse({"error": "El reciclador no existe."})
+
+        # Crear un registro en SolicitudRechazada
+        SolicitudRechazada.objects.create(
+            id_solicitud=solicitud,
+            id_reciclador=reciclador,  # Aquí reciclador ya está vinculado con su id_usuario
+            fecha_rechazo=timezone.now()
+        )
+
+        return JsonResponse({"success": "La solicitud ha sido rechazada correctamente."})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)})
+
+def cancelar_solicitud(request):
+    try:
+        data = json.loads(request.body)
+
+        id_solicitud = data.get('id_solicitud')
+        id_usuario = data.get('id_usuario')
+        p_motivo = data.get('motivo')
+
+        # Validar que los parámetros estén presentes
+        if not id_solicitud or not id_usuario:
+            return JsonResponse({"error": "Faltan parámetros requeridos."})
+
+        # Obtener la solicitud
+        try:
+            solicitud = SolicitudRecoleccion.objects.get(id_solicitud=id_solicitud)
+        except SolicitudRecoleccion.DoesNotExist:
+            return JsonResponse({"error": "La solicitud no existe."})
+
+        try:
+            usuario = Usuario.objects.get(id_usuario=id_usuario)
+        except Usuario.DoesNotExist:
+            return JsonResponse({"error": "El usuario no existe."})
+
+        if solicitud.id_usuario==usuario:#El que cancela es el solicitante
+            cancelar_solicitud=SolicitudesCanceladas.objects.create(
+                id_solicitud=solicitud,
+                id_usuario=usuario,
+                motivo=p_motivo if solicitud.estado!="P" else "Solicitud cancelada."#si el estado es P entonces no se pide motivo
+            )
+            cancelar_solicitud.save()
+
+            #actualizo el estado de la solicitud
+            solicitud.estado="CU"
+            solicitud.save()
+
+            # Enviar el estado actualizado a través de Pusher
+            pusher_client.trigger(f'estado_solicitud_{id_solicitud}_channel', 'estado_solicitud', {
+                'id_solicitud': id_solicitud,
+                'estado': solicitud.estado
+            })
+        elif solicitud.id_reciclador==id_usuario:#El que cancela es el reciclador
+            # Validar que los parámetros estén presentes
+            if not p_motivo:
+                return JsonResponse({"error": "Faltan parámetros requeridos."})
+
+            # Crear un registro en SolicitudesCanceladas
+            cancelar_solicitud=SolicitudesCanceladas.objects.create(
+                id_solicitud=solicitud,
+                id_usuario=usuario,
+                motivo=p_motivo
+            )
+            cancelar_solicitud.save()
+
+            #actualizo el estado de la solicitud
+            solicitud.estado="CR"
+            solicitud.save()
+
+            # Enviar el estado actualizado a través de Pusher
+            pusher_client.trigger(f'solicitud_{id_solicitud}_channel', 'estado_solicitud', {
+                'id_solicitud': id_solicitud,
+                'estado': solicitud.estado,
+                'fecha_arribo': solicitud.fecha_arribo.isoformat() if solicitud.fecha_arribo else ''  # Convertir a cadena ISO 8601
+            })
+        else:
+            return JsonResponse({"error": "No se pudo identificar al usuario."})
+
+
+        solicitud_data = {
+            'estado': solicitud.estado
+        }
+
+        return JsonResponse({"success": "La solicitud ha sido cancelada correctamente.","data": solicitud_data})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)})
+
+def confirmar_cancelacion_solicitud(request):
+    try:
+        data = json.loads(request.body)
+
+        id_solicitud = data.get('id_solicitud')
+        id_usuario = data.get('id_usuario')
+
+        # Validar que los parámetros estén presentes
+        if not id_solicitud or not id_usuario:
+            return JsonResponse({"error": "Faltan parámetros requeridos."})
+
+        # Obtener la solicitud
+        try:
+            solicitud = SolicitudRecoleccion.objects.get(id_solicitud=id_solicitud)
+        except SolicitudRecoleccion.DoesNotExist:
+            return JsonResponse({"error": "La solicitud no existe."})
+
+        try:
+            usuario = Usuario.objects.get(id_usuario=id_usuario)
+        except Usuario.DoesNotExist:
+            return JsonResponse({"error": "El usuario no existe."})
+
+        if solicitud.id_usuario==usuario or solicitud.id_reciclador==id_usuario:#Verifico que sea uno de los usuarios de la solicitud
+            #obtengo la cancelación
+            try:
+                cancelar_solicitud=SolicitudesCanceladas.objects.get(id_solicitud=solicitud)
+            except SolicitudRecoleccion.DoesNotExist:
+                return JsonResponse({"error": "La cancelación de solicitud no existe."})
+
+            if cancelar_solicitud.id_usuario!=id_usuario: #El que acepta la cancelación debe ser diferente al que cancelo
+                #actualizo el estado de la solicitud
+                solicitud.estado="FC"
+                solicitud.save()
+            else:
+                return JsonResponse({"error": "Usuario incorrecto."})
+        else:
+            return JsonResponse({"error": "No se pudo identificar al usuario."})
+
+        return JsonResponse({"success": "La solicitud ha sido finalizada correctamente."})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)})
+
+## obtener solicitudes para mostrar al reciclador
+def obtener_solicitudes_por_usuario(request):
+    if request.method == "POST":
+        data = json.loads(request.body)
+        # Obtener el id_usuario desde los parámetros de la solicitud
+        id_usuario = data.get('id_usuario')
+
+        # Validar que el parámetro esté presente
+        if not id_usuario:
+            return JsonResponse({"error": "Falta el parámetro requerido: id_usuario."})
+
+        try:
+            usuario = Usuario.objects.get(id_usuario=id_usuario)
+        except Usuario.DoesNotExist:
+            return JsonResponse({"error": "El usuario no existe."})
+
+        # Validar que el usuario es un reciclador
+        try:
+            reciclador = Reciclador.objects.get(id_usuario=id_usuario)
+        except Reciclador.DoesNotExist:
+            return JsonResponse({"error": "El usuario no es un reciclador válido."})
+
+        # Obtener los IDs de las solicitudes rechazadas por este reciclador específico
+        solicitudes_rechazadas_ids = SolicitudRechazada.objects.filter(
+            id_reciclador=reciclador
+        ).values_list('id_solicitud', flat=True)
 
         # Crear una lista para almacenar los datos de las solicitudes con sus detalles
         solicitudes_list = []
 
-        for solicitud in solicitudes:
-            # Obtener el detalle asociado a la solicitud
-            detalle = SolicitudDetalle.objects.filter(id_solicitud=solicitud).first()
+        # Subconsulta para obtener los IDs de las solicitudes calificadas por el usuario
+        subquery = Calificacion.objects.filter(
+            id_usuario_calificador=usuario,
+            id_solicitud__id_solicitud=OuterRef('id_solicitud')  # Comparar con el campo 'id_solicitud' del modelo relacionado
+        ).values('id_solicitud')
 
-            # Preparar la estructura de datos que quieres devolver al frontend
+        # Escenario 1: Buscar si el usuario (como reciclador) ha aceptado alguna solicitud y no esta finalizada ni calificada
+        solicitudes_aceptadas = SolicitudRecoleccion.objects.filter(
+            id_reciclador=id_usuario
+        ).exclude(
+            estado__in=['CR', 'FC', 'F', 'P']
+        ).exclude(
+            id_solicitud__in=Subquery(subquery)  # Excluir solicitudes ya calificadas
+        ).order_by('-fecha_inicio')
+
+        if solicitudes_aceptadas.exists():
+            # Si el reciclador ha aceptado alguna solicitud, devolver esas solicitudes
+            for solicitud in solicitudes_aceptadas:
+                # Omitir solicitudes que no tienen un detalle asociado
+                try:
+                    detalle = solicitud.solicituddetalle
+                except SolicitudDetalle.DoesNotExist:
+                    continue  # Si no tiene detalle, omitir esta solicitud
+
+                #calificacion_reciclador = Calificacion.objects.filter(id_usuario_calificador=usuario, id_solicitud=solicitud)
+
+                #if not calificacion_reciclador.exists():
+                solicitud_data = {
+                    'id_solicitud': solicitud.id_solicitud,
+                    'estado': solicitud.estado,
+                    'fecha_inicio': solicitud.fecha_inicio,
+                    'id_reciclador': solicitud.id_reciclador,
+                    'id_usuario': solicitud.id_usuario.id_usuario,
+                    'materiales': detalle.materiales if detalle else '',
+                    'direccion': detalle.direccion if detalle else '',
+                    'ubicacion': detalle.ubicacion if detalle else '',
+                    'ubicacion_reciclador': detalle.ubicacion_reciclador if detalle else '',
+                    'fecha_arribo': solicitud.fecha_arribo,  # Convertir a cadena ISO 8601
+                    'fotos': [imagen.get_image_url() for imagen in detalle.fotos.all()] if detalle else []
+                }
+
+                # Añadir esta solicitud a la lista
+                solicitudes_list.append(solicitud_data)
+        else:
+            # Escenario 2: Si no ha aceptado ninguna, devolver todas las solicitudes en estado pendiente
+            # Excluir solo las solicitudes rechazadas por el reciclador actual
+            solicitudes_pendientes = SolicitudRecoleccion.objects.filter(
+                estado='P'
+            ).exclude(id_solicitud__in=solicitudes_rechazadas_ids)
+
+            for solicitud in solicitudes_pendientes:
+                # Omitir solicitudes que no tienen un detalle asociado
+                try:
+                    detalle = solicitud.solicituddetalle
+                except SolicitudDetalle.DoesNotExist:
+                    continue  # Si no tiene detalle, omitir esta solicitud
+
+                solicitud_data = {
+                    'id_solicitud': solicitud.id_solicitud,
+                    'estado': solicitud.estado,
+                    'fecha_inicio': solicitud.fecha_inicio,
+                    'id_reciclador': solicitud.id_reciclador,
+                    'materiales': detalle.materiales if detalle else '',
+                    'direccion': detalle.direccion if detalle else '',
+                    'ubicacion': detalle.ubicacion if detalle else '',
+                    'ubicacion_reciclador': detalle.ubicacion_reciclador if detalle else '',
+                    'fotos': [imagen.get_image_url() for imagen in detalle.fotos.all()] if detalle else []
+                }
+
+                # Añadir esta solicitud a la lista
+                solicitudes_list.append(solicitud_data)
+
+        return JsonResponse({"data": solicitudes_list, "success": True}, safe=False)
+
+#obtiene ultima solicitud pendiente del usuario
+def obtener_ultima_solicitud_pendiente(request):
+    try:
+        # Obtener el ID del usuario desde el request
+        data = json.loads(request.body)
+        id_usuario = data.get('id_usuario')
+
+        # Validar que el parámetro esté presente
+        if not id_usuario:
+            return JsonResponse({"error": "Falta el parámetro requerido: id_usuario."})
+
+        # Validar que el usuario existe
+        try:
+            usuario = Usuario.objects.get(id_usuario=id_usuario)
+        except Usuario.DoesNotExist:
+            return JsonResponse({"error": "El usuario no existe."})
+
+        # Subconsulta para obtener los IDs de las solicitudes calificadas por el usuario
+        subquery = Calificacion.objects.filter(
+            id_usuario_calificador=usuario,
+            id_solicitud__id_solicitud=OuterRef('id_solicitud')  # Comparar con el campo 'id_solicitud' del modelo relacionado
+        ).values('id_solicitud')
+
+        # Filtrar la solicitud pendiente más reciente excluyendo las solicitudes calificadas y con ciertos estados
+        ultima_solicitud = SolicitudRecoleccion.objects.filter(
+            id_usuario=usuario
+        ).exclude(
+            estado__in=['CU', 'FC', 'F']  # Excluir solicitudes con estos estados
+        ).exclude(
+            id_solicitud__in=Subquery(subquery)  # Excluir solicitudes ya calificadas
+        ).order_by('-fecha_inicio').first()
+
+        if ultima_solicitud:
+            detalle = SolicitudDetalle.objects.get(id_solicitud=ultima_solicitud.id_solicitud)
+
+            '''
+            # Asegurarse de que detalle no sea None antes de acceder a sus atributos
+            ubicacion_reciclador = detalle.ubicacion_reciclador if detalle else None
+
             solicitud_data = {
-                'id_solicitud': solicitud.id_solicitud,
-                'estado': solicitud.estado,
-                'fecha_inicio': solicitud.fecha_inicio,
+                'id_solicitud': ultima_solicitud.id_solicitud,
+                'estado': ultima_solicitud.estado,
+                'fecha_inicio': ultima_solicitud.fecha_inicio,
+                'descripcion': ultima_solicitud.descripcion,
+                'id_reciclador': ultima_solicitud.id_reciclador,
+                'ubicacion_reciclador': ubicacion_reciclador
+            }
+            '''
+            solicitud_data = {
+                'id_solicitud': ultima_solicitud.id_solicitud,
+                'estado': ultima_solicitud.estado,
+                'fecha_inicio': ultima_solicitud.fecha_inicio,
+                'id_reciclador': ultima_solicitud.id_reciclador,
+                'id_usuario': ultima_solicitud.id_usuario.id_usuario,
                 'materiales': detalle.materiales if detalle else '',
                 'direccion': detalle.direccion if detalle else '',
                 'ubicacion': detalle.ubicacion if detalle else '',
+                'ubicacion_reciclador': detalle.ubicacion_reciclador if detalle else '',
+                'fecha_arribo': ultima_solicitud.fecha_arribo,  # Convertir a cadena ISO 8601
                 'fotos': [imagen.get_image_url() for imagen in detalle.fotos.all()] if detalle else []
             }
+            return JsonResponse({"data": solicitud_data, "success": True})
+        else:
+            return JsonResponse({"message": "No hay solicitudes pendientes para este usuario."})
 
-            # Añadir esta solicitud a la lista
-            solicitudes_list.append(solicitud_data)
+    except Exception as e:
+        return JsonResponse({"error": str(e)})
 
-        return JsonResponse(solicitudes_list, safe=False)
+
+
 '''
 
 def logout_view(request):

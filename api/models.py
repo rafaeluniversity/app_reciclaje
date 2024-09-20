@@ -1,6 +1,7 @@
 from django.db import models
 from django.db.models import JSONField
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 # Create your models here.
 
 class Imagen(models.Model):
@@ -130,16 +131,6 @@ class Reciclador(UsuarioPersona):
     def __str__(self):
         return f"Reciclador {self.id_reciclador} - {self.nacionalidad} ({self.estado})"
 
-class Calificacion(models.Model):
-    id_reciclador = models.ForeignKey(Reciclador, on_delete=models.CASCADE, related_name='calificaciones_reciclador')
-    id_usuario = models.ForeignKey(UsuarioPersona, on_delete=models.CASCADE)
-    calificacion_reciclador = models.IntegerField()
-    observacion = models.CharField(max_length=1000)
-    fecha = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"Calificacion {self.id} - Reciclador: {self.id_reciclador} - Usuario: {self.id_usuario}"
-
 class Archivo(models.Model):
     id_archivo = models.BigAutoField(primary_key=True)
     descripcion = models.CharField(max_length=250)
@@ -159,20 +150,24 @@ class CarnetRecolectores(models.Model):
 
 class SolicitudRecoleccion(models.Model):
     ESTADO_CHOICES = [
-        ('P', 'Pendiente'),
-        ('A', 'Aceptada'),
-        ('C', 'Cancelada'),
-        ('F', 'Fallida'),
-        ('E', 'Entregada'),
+        ('P', 'Pendiente'),#solicitud en curso
+        ('A', 'Aceptada'),#solicitud en curso
+        ('L', 'Cerca'),#solicitud en curso
+        ('R', 'Recolectada'),#solicitud en curso
+        ('CR', 'Cancelada Reciclador'),#solicitud en curso solo para solicitante, cuando este acepte se cambia el estado a FC
+        ('CU', 'Cancelada Usuario'),#solicitud en curso solo para reciclador, cuando este acepte se cambia el estado a FC
+        ('FC', 'Fin Cancelada'),
+        ('F', 'Fin')
     ]
 
     id_solicitud = models.CharField(primary_key=True, max_length=13)
     id_usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE)
     id_reciclador = models.CharField(max_length=13)
     descripcion = models.CharField(max_length=1000)
-    estado = models.CharField(max_length=1, choices=ESTADO_CHOICES)
+    estado = models.CharField(max_length=2, choices=ESTADO_CHOICES)
     fecha_inicio = models.DateTimeField(auto_now_add=True)
     fecha_asig = models.DateTimeField(null=True, blank=True)
+    fecha_arribo = models.DateTimeField(null=True, blank=True)
     fecha_fin = models.DateTimeField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
@@ -193,6 +188,7 @@ class SolicitudDetalle(models.Model):
     materiales = models.TextField(help_text="Lista de materiales separados por comas")
     direccion = models.CharField(max_length=255, help_text="Dirección del solicitante")
     ubicacion = models.JSONField(help_text="Ubicación como lista [latitud, longitud]")
+    ubicacion_reciclador = models.JSONField(help_text="Ubicación del reciclador como lista [latitud, longitud]", null=True, blank=True)
     calificado = models.BooleanField(default=False)
     fotos = models.ManyToManyField(Imagen, related_name='solicitudes', blank=True)
 
@@ -219,6 +215,38 @@ class ArchivosSolicitudes(models.Model):
 
     def __str__(self):
         return f"Archivo_Solicitud {self.id_archivo_solicitud} - Solicitud: {self.solicitud.id_solicitud}"
+
+'''
+class Calificacion(models.Model):
+    id_reciclador = models.ForeignKey(Reciclador, on_delete=models.CASCADE, related_name='calificaciones_reciclador')
+    id_usuario = models.ForeignKey(UsuarioPersona, on_delete=models.CASCADE)
+    calificacion_reciclador = models.IntegerField()
+    observacion = models.CharField(max_length=1000)
+    fecha = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Calificacion {self.id} - Reciclador: {self.id_reciclador} - Usuario: {self.id_usuario}"
+'''
+
+class Calificacion(models.Model):
+    id_usuario_calificador = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='usuario_calificador')
+    id_usuario_calificado = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='usuario_calificado')
+    id_solicitud = models.ForeignKey(SolicitudRecoleccion, on_delete=models.CASCADE)
+    calificacion = models.IntegerField()
+    fecha = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Calificacion {self.id} - Usuario calificador: {self.id_usuario_calificador} - Usuario calificado: {self.id_usuario_calificado}"
+
+class SolicitudesCanceladas(models.Model):
+    id_usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='usuario_cancela')
+    id_solicitud = models.ForeignKey(SolicitudRecoleccion, on_delete=models.CASCADE)
+    motivo = models.CharField(max_length=500)
+    fecha = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Cancelacion {self.id}"
+
 
 class ReporteDenuncias(models.Model):
     ESTADO_CHOICES = [('A', 'Activo'), ('I', 'Inactivo')]
@@ -352,3 +380,23 @@ class CentroAcopio(models.Model):
 
     def __str__(self):
         return f"{self.nombre_acopio} - {self.organizacion.razon_social}"
+
+class SolicitudRechazada(models.Model):
+    id_solicitud = models.ForeignKey('SolicitudRecoleccion', on_delete=models.CASCADE, related_name='rechazos')
+    id_reciclador = models.ForeignKey('Reciclador', on_delete=models.CASCADE, related_name='rechazos_realizados')
+    fecha_rechazo = models.DateTimeField(default=timezone.now)
+
+    def __str__(self):
+        return f"Rechazo de Solicitud {self.id_solicitud_id} por Reciclador {self.id_reciclador_id} el {self.fecha_rechazo.strftime('%Y-%m-%d %H:%M:%S')}"
+
+class UsuarioTemporal(models.Model):
+    correo = models.EmailField(max_length=200, unique=True)
+    clave = models.CharField(max_length=128)
+    fecha_registro = models.DateTimeField(auto_now_add=True)
+    email_verification_token = models.CharField(max_length=100, blank=True, null=True)
+    is_email_verified = models.BooleanField(default=False)
+    tipo_usuario = models.CharField(max_length=10, choices=[('empresa', 'Empresa'), ('persona', 'Persona'), ('reciclador', 'Reciclador')])
+    datos_adicionales = models.TextField()  # Puedes usar JSONField si está disponible en tu base de datos
+
+    def __str__(self):
+        return self.correo

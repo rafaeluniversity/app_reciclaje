@@ -65,7 +65,7 @@ ROOT_URLCONF = 'app_reciclaje.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'api/templates'],  # Asegúrate de que apunta a la carpeta correcta
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -77,6 +77,7 @@ TEMPLATES = [
         },
     },
 ]
+
 
 WSGI_APPLICATION = 'app_reciclaje.wsgi.application'
 
@@ -95,6 +96,15 @@ DATABASES = {
         'PORT': '3306',
     }
 }
+
+# Email configuration
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'  # Cambia esto si usas otro servicio
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'rafaelzambranomendoza@gmail.com'  # correo de Gmail
+EMAIL_HOST_PASSWORD = 'ydyp blxw zuju cxds'  # contraseña de Gmail
+DEFAULT_FROM_EMAIL = 'rafaelzambranomendoza@gmail.com'  # correo de Gmail - sera de donde se envien los correos
 
 
 # Password validation
@@ -162,7 +172,6 @@ CHANNEL_LAYERS = {
         'BACKEND': 'channels.layers.InMemoryChannelLayer',
     },
 }
-
 
 PUSHER_APP_ID = '1848510'
 PUSHER_KEY = '390cef738b8ca03faacd'
