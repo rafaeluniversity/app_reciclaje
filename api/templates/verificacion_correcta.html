@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f4f8;
+            margin: 0;
+            padding: 0;
+            text-align: center;
+        }
+        .container {
+            width: 80%;
+            max-width: 600px;
+            margin: 40px auto;
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #007BFF;
+            font-size: 24px;
+        }
+        p {
+            font-size: 18px;
+            color: #555;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 25px;
+            color: white;
+            background-color: #28a745;
+            text-decoration: none;
+            border-radius: 5px;
+            margin-top: 20px;
+            transition: background-color 0.3s ease;
+        }
+        .button:hover {
+            background-color: #218838;
+        }
+        .error {
+            color: #dc3545; /* Color rojo para el mensaje de error */
+            font-weight: bold;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 14px;
+            color: #aaa;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {% if error %}
+            <h1>¡Ups! No se completó el proceso</h1>
+            <p class="error">{{ error }}</p>
+        {% else %}
+            <h1>¡Gracias, {{ nombre_usuario }}!</h1>
+            <p>Tu registro ha sido exitoso. Por favor, cierra esta página e inicia sesión en nuestra plataforma para comenzar a disfrutar de nuestros servicios.</p>
+        {% endif %}
+        <a href="https://tu-pagina-oficial.com" class="button">Iniciar Sesión</a>
+        <div class="footer">
+            <p>Juntos, apoyemos el reciclaje y fomentemos un futuro sostenible para nuestro planeta.</p>
+        </div>
+    </div>
+</body>
+</html>

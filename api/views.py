@@ -10,27 +10,105 @@ from django.http import HttpRequest
 #from channels.layers import get_channel_layer
 import pusher
 #from asgiref.sync import async_to_sync
-from django.conf import settings
+#from django.conf import settings
+from django.shortcuts import get_object_or_404, render
 from django.db.models import OuterRef, Subquery
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.utils.crypto import get_random_string
 
-def enviar_correo(request):
-    if request.method == "GET":  # Asegúrate de que es una solicitud GET
-        try:
-            send_mail(
-                'Correo de prueba',
-                'Este es un mensaje de prueba enviado desde Django.',
-                'rzambrano2485@utm.edu.ec',  # Reemplaza con tu correo
-                ['rafaelzambranomendoza@gmail.com'],  # Reemplaza con el correo del destinatario
-                fail_silently=False,
+def verificar_correo(request, token):
+    try:
+        # Buscar el usuario temporal por el token de verificación
+        usuario_temporal = get_object_or_404(UsuarioTemporal, email_verification_token=token)
+
+        # Verificar que el correo no ha sido verificado previamente
+        if usuario_temporal.is_email_verified:
+            return render(request, 'verificacion_correcta.html', {
+                'nombre_usuario': usuario_temporal.datos_adicionales.get('razon_social', f"{usuario_temporal.nombres} {usuario_temporal.apellidos}"),
+                'error': "El correo ya ha sido verificado."
+            })
+
+        # Marcar el correo como verificado
+        usuario_temporal.is_email_verified = True
+        usuario_temporal.save()
+
+        # Registrar el usuario en la tabla principal según su tipo
+        datos = usuario_temporal.datos_adicionales  # Guardar datos adicionales
+        if usuario_temporal.tipo_usuario == 'empresa':
+            usuario_empresa = UsuarioEmpresa(
+                correo=usuario_temporal.correo,
+                clave=usuario_temporal.clave,
+                razon_social=datos['razon_social'],
+                actividad_comercial=datos['actividad_comercial'],
+                ced_rep_legal=datos['ced_rep_legal'],
+                nom_rep_legal=datos['nom_rep_legal'],
+                direccion=datos['direccion'],
+                redes=datos['redes'],
+                id_rol=Roles.objects.get(id_rol='rol_002'),
+                url_foto=datos['url_foto'],
+                telefono=datos['telefono'],
+                ruc=datos['ruc']
             )
-            return JsonResponse({"success": "Correo de prueba enviado correctamente."})
-        except Exception as e:
-            return JsonResponse({"error": str(e)})
-    else:
-        return JsonResponse({"error": "Método no permitido. Usa GET."})
+            usuario_empresa.save()
+            nombre_usuario = datos['razon_social']
+
+        elif usuario_temporal.tipo_usuario == 'persona':
+            usuario_persona = UsuarioPersona(
+                correo=usuario_temporal.correo,
+                clave=usuario_temporal.clave,
+                nombres=usuario_temporal.nombres,
+                apellidos=usuario_temporal.apellidos,
+                provincia=datos['provincia'],
+                ciudad=datos['ciudad'],
+                direccion=datos['direccion'],
+                fec_nac=datos['fec_nac'],
+                genero=datos['genero'],
+                id_rol=Roles.objects.get(id_rol='rol_004'),
+                url_foto=datos['url_foto'],
+                cedula=datos['cedula'],
+                telefono=datos['telefono']
+            )
+            usuario_persona.save()
+            nombre_usuario = f"{usuario_temporal.nombres} {usuario_temporal.apellidos}"
+
+        elif usuario_temporal.tipo_usuario == 'reciclador':
+            reciclador = Reciclador(
+                correo=usuario_temporal.correo,
+                clave=usuario_temporal.clave,
+                nombres=usuario_temporal.nombres,
+                apellidos=usuario_temporal.apellidos,
+                provincia=datos['provincia'],
+                ciudad=datos['ciudad'],
+                direccion=datos['direccion'],
+                fec_nac=datos['fec_nac'],
+                genero=datos['genero'],
+                id_empresa=datos['id_empresa'],
+                calificacion_reciclador=datos['calificacion_reciclador'],
+                nacionalidad=datos['nacionalidad'],
+                id_rol=Roles.objects.get(id_rol='rol_003'),
+                url_foto=datos['url_foto'],
+                cedula=datos['cedula'],
+                telefono=datos['telefono']
+            )
+            reciclador.save()
+            nombre_usuario = f"{usuario_temporal.nombres} {usuario_temporal.apellidos}"
+
+        # Eliminar el registro temporal
+        usuario_temporal.delete()
+
+        # Renderizar el template de éxito
+        return render(request, 'verificacion_correcta.html', {
+            'nombre_usuario': nombre_usuario,  # Pasar el nombre o razón social
+            'error': None
+        })
+
+    except Exception as e:
+        # Renderizar el template con el mensaje de error
+        return render(request, 'verificacion_correcta.html', {
+            'nombre_usuario': '',  # Puedes dejarlo vacío o manejarlo como desees
+            'error': str(e)  # Mostrar el mensaje de error
+        })
 
 # Configuración del cliente de Pusher
 pusher_client = pusher.Pusher(
@@ -93,7 +171,8 @@ from .models import (
     CentroAcopio,
     SolicitudDetalle,
     SolicitudRechazada,
-    SolicitudesCanceladas
+    SolicitudesCanceladas,
+    UsuarioTemporal
 )
 
 class CentroAcopioViewSet(viewsets.ModelViewSet):
@@ -274,7 +353,7 @@ def crearRol(request):
         # Devolver un error más informativo
         return JsonResponse({"error": f"Ocurrió un error al procesar la solicitud: {str(e)}"}, charset='utf-8')
 
-#Registro de un usuario de tipo empresa
+# Registro de un usuario de tipo empresa
 def registroEmpresa(request):
     try:
         if request.method == "POST":
@@ -292,54 +371,68 @@ def registroEmpresa(request):
             redes = body_data.get("redes")
             url_foto = body_data.get("url_foto")
             telefono = body_data.get("telefono")
-            ruc = body_data.get("ruc")  # Agregar el campo ruc
+            ruc = body_data.get("ruc")
 
-            # Verificar la unicidad del correo electrónico, razón social y RUC
-            if UsuarioEmpresa.objects.filter(correo=correo).exists():
+            # Verificar la unicidad del correo electrónico
+            if UsuarioTemporal.objects.filter(correo=correo).exists() or Usuario.objects.filter(correo=correo).exists():
                 return JsonResponse({"error": "El correo electrónico ya está en uso"}, charset='utf-8')
 
-            if UsuarioEmpresa.objects.filter(razon_social=razon_social).exists():
-                return JsonResponse({"error": "La razón social ya está en uso"}, charset='utf-8')
+            # Crear un token de verificación
+            verification_token = get_random_string(length=32)
 
-            if UsuarioEmpresa.objects.filter(ruc=ruc).exists():
-                return JsonResponse({"error": "El RUC ya está en uso"}, charset='utf-8')
+            # Crear un diccionario con los datos adicionales
+            datos_adicionales = {
+                "razon_social": razon_social,
+                "actividad_comercial": actividad_comercial,
+                "ced_rep_legal": ced_rep_legal,
+                "nom_rep_legal": nom_rep_legal,
+                "direccion": direccion,
+                "redes": redes,
+                "url_foto": url_foto,
+                "telefono": telefono,
+                "ruc": ruc
+            }
 
-            # Convertir la cadena JSON de redes en un diccionario si es necesario
-            if isinstance(redes, str):
-                redes = json.loads(redes)
-
-            # Crear un nuevo objeto UsuarioEmpresa
-            usuario_empresa = UsuarioEmpresa(
+            # Crear un nuevo objeto UsuarioTemporal
+            usuario_temporal = UsuarioTemporal(
                 correo=correo,
                 clave=make_password(clave),
-                razon_social=razon_social,
-                actividad_comercial=actividad_comercial,
-                ced_rep_legal=ced_rep_legal,
-                nom_rep_legal=nom_rep_legal,
-                direccion=direccion,
-                redes=redes,
-                id_rol=Roles.objects.get(id_rol='rol_002'),  # Asignar el rol correspondiente,
-                url_foto=url_foto,
-                telefono=telefono,
-                ruc=ruc  # Agregar el campo ruc
+                email_verification_token=verification_token,
+                tipo_usuario='empresa',
+                datos_adicionales=json.dumps(datos_adicionales)  # Almacenar datos adicionales como JSON
+            )
+            usuario_temporal.save()
+
+            # Crear el enlace de verificación
+            verification_link = f'https://rafaeloxj.pythonanywhere.com/verify_email/{verification_token}/'
+
+            # Renderizar el correo
+            email_subject = 'Verificación de Correo - ¡Bienvenido a nuestra comunidad!'
+            nombre_usuario = razon_social  # Para empresas, usamos la razón social
+            email_body = render_to_string('correo_verificacion.html', {
+                'nombre_usuario': nombre_usuario,
+                'verification_link': verification_link
+                })
+
+            # Enviar el correo
+            send_mail(
+                email_subject,
+                email_body,
+                'rafaelzambranomendoza@gmail.com',  # Reemplaza con tu correo
+                [correo],
+                fail_silently=False,
+                html_message=email_body,
             )
 
-            # Guardar el objeto en la base de datos
-            usuario_empresa.save()
-
-            return JsonResponse({"success": True, "message": "UsuarioEmpresa registrado exitosamente"}, charset='utf-8')
+            return JsonResponse({"success": True, "message": "UsuarioTemporal registrado exitosamente. Se ha enviado un correo de verificación."}, charset='utf-8')
 
         else:
             return JsonResponse({"error": "Método no permitido"}, charset='utf-8')
 
     except Exception as e:
-        # Imprimir detalles de la excepción
         print(f"Error en registroEmpresa: {str(e)}")
-
-        # Devolver un error más informativo
         return JsonResponse({"error": f"Ocurrió un error al procesar la solicitud: {str(e)}"}, charset='utf-8')
 
-#
 def registroPersona(request):
     try:
         if request.method == "POST":
@@ -361,39 +454,62 @@ def registroPersona(request):
             telefono = body_data.get("telefono")
 
             # Verificar la unicidad del correo electrónico
-            if Usuario.objects.filter(correo=correo).exists():
+            if Usuario.objects.filter(correo=correo).exists() or UsuarioTemporal.objects.filter(correo=correo).exists():
                 return JsonResponse({"error": "El correo electrónico ya está en uso"}, charset='utf-8')
 
-            # Crear un nuevo objeto UsuarioPersona
-            usuario_persona = UsuarioPersona(
+            # Crear un token de verificación
+            verification_token = get_random_string(length=32)
+
+            # Crear un nuevo objeto UsuarioTemporal
+            usuario_temporal = UsuarioTemporal(
                 correo=correo,
                 clave=make_password(clave),
-                nombres=nombres,
-                apellidos=apellidos,
-                provincia=provincia,
-                ciudad=ciudad,
-                direccion=direccion,
-                fec_nac=fec_nac,
-                genero=genero,
-                id_rol=Roles.objects.get(id_rol='rol_004'),  # Asignar el rol correspondiente
-                url_foto=url_foto,
-                cedula=cedula,
-                telefono=telefono
+                email_verification_token=verification_token,
+                tipo_usuario='persona',
+                datos_adicionales={
+                    "nombres": nombres,
+                    "apellidos": apellidos,
+                    "provincia": provincia,
+                    "ciudad": ciudad,
+                    "direccion": direccion,
+                    "fec_nac": fec_nac,
+                    "genero": genero,
+                    "url_foto": url_foto,
+                    "cedula": cedula,
+                    "telefono": telefono
+                }
             )
 
-            # Guardar el objeto en la base de datos
-            usuario_persona.save()
+            # Guardar el objeto temporal en la base de datos
+            usuario_temporal.save()
 
-            return JsonResponse({"success": True, "message": "UsuarioPersona registrado exitosamente"}, charset='utf-8')
+            # Crear el enlace de verificación
+            verification_link = f'https://rafaeloxj.pythonanywhere.com/verify_email/{verification_token}/'
+
+            # Renderizar el correo
+            email_subject = 'Verificación de Correo'
+            email_body = render_to_string('correo_verificacion.html', {
+                'verification_link': verification_link,
+                'nombre_usuario': nombres + " " + apellidos  # Personalizar el saludo con el nombre completo
+            })
+
+            # Enviar el correo
+            send_mail(
+                email_subject,
+                email_body,
+                'rafaelzambranomendoza@gmail.com',  # Reemplaza con tu correo
+                [correo],
+                fail_silently=False,
+                html_message=email_body,
+            )
+
+            return JsonResponse({"success": True, "message": "UsuarioPersona registrado exitosamente. Se ha enviado un correo de verificación."}, charset='utf-8')
 
         else:
             return JsonResponse({"error": "Método no permitido"}, charset='utf-8')
 
     except Exception as e:
-        # Imprimir detalles de la excepción
         print(f"Error en registroPersona: {str(e)}")
-
-        # Devolver un error más informativo
         return JsonResponse({"error": f"Ocurrió un error al procesar la solicitud: {str(e)}"}, charset='utf-8')
 
 #
@@ -429,43 +545,67 @@ def registroReciclador(request):
                 return JsonResponse({"error": "El 'id_empresa' proporcionado no existe"}, charset='utf-8')
 
             # Verificar la unicidad del correo electrónico
-            if Usuario.objects.filter(correo=correo).exists():
+            if Usuario.objects.filter(correo=correo).exists() or UsuarioTemporal.objects.filter(correo=correo).exists():
                 return JsonResponse({"error": "El correo electrónico ya está en uso"}, charset='utf-8')
 
-            # Crear un nuevo objeto Reciclador, que hereda de UsuarioPersona
-            reciclador = Reciclador(
+            # Crear un token de verificación
+            verification_token = get_random_string(length=32)
+
+            # Crear un nuevo objeto UsuarioTemporal
+            usuario_temporal = UsuarioTemporal(
                 correo=correo,
                 clave=make_password(clave),
-                nombres=nombres,
-                apellidos=apellidos,
-                provincia=provincia,
-                ciudad=ciudad,
-                direccion=direccion,
-                fec_nac=fec_nac,
-                genero=genero,
-                id_rol=Roles.objects.get(id_rol='rol_003'),  # Asignar el rol correspondiente
-                calificacion_reciclador=calificacion_reciclador,
-                nacionalidad=nacionalidad,
-                id_empresa=id_empresa,
-                url_foto=url_foto,
-                cedula=cedula,
-                telefono=telefono
+                email_verification_token=verification_token,
+                tipo_usuario='reciclador',
+                datos_adicionales={
+                    "nombres": nombres,
+                    "apellidos": apellidos,
+                    "provincia": provincia,
+                    "ciudad": ciudad,
+                    "direccion": direccion,
+                    "fec_nac": fec_nac,
+                    "genero": genero,
+                    "id_empresa": id_empresa,
+                    "calificacion_reciclador": calificacion_reciclador,
+                    "nacionalidad": nacionalidad,
+                    "url_foto": url_foto,
+                    "cedula": cedula,
+                    "telefono": telefono
+                }
             )
 
-            # Guardar el objeto Reciclador en la base de datos
-            reciclador.save()
+            # Guardar el objeto temporal en la base de datos
+            usuario_temporal.save()
 
-            return JsonResponse({"success": True, "message": "Reciclador registrado exitosamente"}, charset='utf-8')
+            # Crear el enlace de verificación
+            verification_link = f'https://rafaeloxj.pythonanywhere.com/verify_email/{verification_token}/'
+
+            # Renderizar el correo
+            email_subject = 'Verificación de Correo'
+            email_body = render_to_string('correo_verificacion.html', {
+                'verification_link': verification_link,
+                'nombre_usuario': nombres + " " + apellidos  # Personalizar el saludo con el nombre completo
+            })
+
+            # Enviar el correo
+            send_mail(
+                email_subject,
+                email_body,
+                'rafaelzambranomendoza@gmail.com',  # Reemplaza con tu correo
+                [correo],
+                fail_silently=False,
+                html_message=email_body,
+            )
+
+            return JsonResponse({"success": True, "message": "Reciclador registrado exitosamente. Se ha enviado un correo de verificación."}, charset='utf-8')
 
         else:
             return JsonResponse({"error": "Método no permitido"}, charset='utf-8')
 
     except Exception as e:
-        # Imprimir detalles de la excepción
         print(f"Error en registroReciclador: {str(e)}")
-
-        # Devolver un error más informativo
         return JsonResponse({"error": f"Ocurrió un error al procesar la solicitud: {str(e)}"}, charset='utf-8')
+
 
 #
 
@@ -496,6 +636,7 @@ def login_view(request):
                 user_data = {
                     "id_usuario": user.id_usuario,
                     "rol": user.id_rol.descripcion,
+                    "id_rol": user.id_rol.id_rol,
                     "nombre_corto": nombre_corto,
                     "url_foto": user.url_foto
                 }
@@ -790,141 +931,240 @@ def obtenerInformacionUsuario(request):
             body_data = json.loads(body_unicode)
 
             # Obtener el id del usuario
-            usuario_ptr_id = body_data.get("id_usuario")
+            p_id_usuario = body_data.get("id_usuario")
 
-            # Verificar si el usuario existe
-            usuario_persona = UsuarioPersona.objects.get(usuario_ptr_id=usuario_ptr_id)
-            usuario_rol = usuario_persona.id_rol.id_rol
+            # Obtener usuario
+            usuario= Usuario.objects.get(id_usuario=p_id_usuario)
+            print("Usuario:", usuario)
 
-            reciclador = usuario_persona.reciclador
-
-            print("ID del usuario recibido:", usuario_ptr_id)
+            # Obtener rol del usuario
+            usuario_rol = usuario.id_rol_id
             print("Usuario Rol:", usuario_rol)
-            print("Reciclador:", reciclador)
 
-            # Obtener información personal del usuario persona
-            informacion_personal = {
-                "cedula": {
-                    "label": "Cédula",
-                    "value": usuario_persona.cedula,
-                    "type": "text",
-                    "editable": False,
-                    "validation": "cedula",
-                    "maxLength": 10
-                },
-                "nombres": {
-                    "label": "Nombres",
-                    "value": usuario_persona.nombres,
-                    "type": "text",
-                    "editable": False,
-                    "validation": "text",
-                    "maxLength": 50
-                },
-                "apellidos": {
-                    "label": "Apellidos",
-                    "value": usuario_persona.apellidos,
-                    "type": "text",
-                    "editable": False,
-                    "validation": "text",
-                    "maxLength": 50
-                },
-                "telefono": {
-                    "label": "Teléfono",
-                    "value": usuario_persona.telefono,
-                    "type": "text",
-                    "editable": True,
-                    "validation": "number10",
-                    "maxLength": 10
-                },
-                "correo": {
-                    "label": "Correo",
-                    "value": usuario_persona.correo,
-                    "type": "email",
-                    "editable": True,
-                    "validation": "email",
-                    "maxLength": 100
-                },
-                "sexo": {
-                    "label": "Sexo",
-                    "value": usuario_persona.genero,
-                    "type": "select",
-                    "editable": True,
-                    "validation": "select"
-                },
-                "fecha_nacimiento": {
-                    "label": "Fecha de nacimiento",
-                    "value": usuario_persona.fec_nac.strftime('%Y-%m-%d'),
-                    "type": "date",
-                    "editable": True,
-                    "validation": "date18"
-                },
-                "direccion": {
-                    "label": "Dirección",
-                    "value": usuario_persona.direccion,
-                    "type": "textarea",
-                    "editable": True,
-                    "validation": "textarea",
-                    "maxLength": 500
-                },
+            rol_user = Roles.objects.get(id_rol=usuario_rol)
 
-            }
+            # Verificar si es usuario Persona o Reciclador
+            if usuario_rol == 'rol_004' or usuario_rol == 'rol_003':
+                # Obtener usuario persona
+                usuario_persona = UsuarioPersona.objects.get(usuario_ptr_id=p_id_usuario)
+                print("Usuario persona:", usuario_persona)
 
-            # Verificar si el usuario es un reciclador
-            if usuario_rol == 'rol_003':
-                # Obtener información del reciclador si existe
-                reciclador = usuario_persona.reciclador
+                # Obtener información personal del usuario persona
+                informacion_general = {
+                    "cedula": {
+                        "label": "Cédula",
+                        "value": usuario_persona.cedula,
+                        "type": "text",
+                        "editable": False,
+                        "validation": "cedula",
+                        "maxLength": 10
+                    },
+                    "nombres": {
+                        "label": "Nombres",
+                        "value": usuario_persona.nombres,
+                        "type": "text",
+                        "editable": True,
+                        "validation": "text",
+                        "maxLength": 50
+                    },
+                    "apellidos": {
+                        "label": "Apellidos",
+                        "value": usuario_persona.apellidos,
+                        "type": "text",
+                        "editable": True,
+                        "validation": "text",
+                        "maxLength": 50
+                    },
+                    "telefono": {
+                        "label": "Teléfono",
+                        "value": usuario_persona.telefono,
+                        "type": "text",
+                        "editable": True,
+                        "validation": "number10",
+                        "maxLength": 10
+                    },
+                    "correo": {
+                        "label": "Correo",
+                        "value": usuario_persona.correo,
+                        "type": "email",
+                        "editable": False,
+                        "validation": "email",
+                        "maxLength": 100
+                    },
+                    "sexo": {
+                        "label": "Sexo",
+                        "value": 'Masculino' if usuario_persona.genero=="M" else 'Femenino',
+                        "type": "select",
+                        "editable": True,
+                        "validation": "select"
+                    },
+                    "fecha_nacimiento": {
+                        "label": "Fecha de nacimiento",
+                        "value": usuario_persona.fec_nac.strftime('%Y-%m-%d'),
+                        "type": "date",
+                        "editable": True,
+                        "validation": "date18"
+                    },
+                    "direccion": {
+                        "label": "Dirección",
+                        "value": usuario_persona.direccion,
+                        "type": "textarea",
+                        "editable": True,
+                        "validation": "textarea",
+                        "maxLength": 500
+                    },
+                }
 
-                # Obtener información de la empresa directamente de UsuarioEmpresa
-                empresa_reciclador = UsuarioEmpresa.objects.filter(id_empresa=reciclador.id_empresa).first()
+                # Verificar si el usuario es un reciclador
+                if usuario_rol == 'rol_003':
+                    # Obtener información del reciclador si existe
+                    reciclador = usuario_persona.reciclador
+                    print("Reciclador:", reciclador)
 
-                if empresa_reciclador:
+                    # Obtener información de la empresa directamente de UsuarioEmpresa
+                    empresa_reciclador = UsuarioEmpresa.objects.filter(id_empresa=reciclador.id_empresa).first()
+                    print("Empresa reciclador:", empresa_reciclador)
 
-                    reciclador_info = {
-                    "calificacion": reciclador.calificacion_reciclador,
-                    "organizacion": {
-                        "razon_social": empresa_reciclador.razon_social,
-                        "link_perfil": "profile/organizacionx",
-                        "direccion": empresa_reciclador.direccion,
-                        "contact": {
+                    reciclador_info = {}
+                    if empresa_reciclador:
+                        reciclador_info = {
+                        "calificacion": reciclador.calificacion_reciclador,
+                        "organizacion": {
+                            "razon_social": empresa_reciclador.razon_social,
+                            "direccion": empresa_reciclador.direccion,
                             "telefono": empresa_reciclador.telefono,
                             "correo": empresa_reciclador.correo,
-                            "facebook": empresa_reciclador.redes.get("facebook"),
-                            "instagram": empresa_reciclador.redes.get("instagram"),
-                            "twitter": empresa_reciclador.redes.get("twitter")
+                            "redes_sociales": {
+                                "facebook": empresa_reciclador.redes.get("facebook",""),
+                                "instagram": empresa_reciclador.redes.get("instagram",""),
+                                "twitter": empresa_reciclador.redes.get("twitter",""),
+                                "youtube": empresa_reciclador.redes.get("youtube",""),
+                                "linkedin": empresa_reciclador.redes.get("linkedin","")
+                            }
                         }
+
                     }
-                }
+
+                    # Combinar información personal del usuario persona y del reciclador si existe
+                    response_data = {
+                        "informacion_general": informacion_general,
+                        "url_foto": usuario_persona.url_foto,
+                        "rol": rol_user.descripcion,
+                        **reciclador_info
+                    }
                 else:
-                    reciclador_info = {
-                    "calificacion": reciclador.calificacion_reciclador,
-                    "organizacion": {
-                        "razon_social": "",
-                        "link_perfil": "",
-                        "direccion": "",
-                        "contact": {
-                            "telefono": "",
-                            "correo": "",
-                            "facebook": "",
-                            "instagram": "",
-                            "twitter": ""
+                    info_contacto = {
+                        "info_contacto": {
+                            "telefono": usuario_persona.telefono,
+                            "correo": usuario_persona.correo
+                        }
+                    }
+
+                    # Si el usuario no es un reciclador, solo devuelve la información personal
+                    response_data = {
+                        "informacion_general": informacion_general,
+                        "url_foto": usuario_persona.url_foto,
+                        "rol": rol_user.descripcion,
+                        **info_contacto
+                    }
+
+            # Verificar si es usuario Organización
+            if usuario_rol == 'rol_002':
+                # Obtener información de la organización
+                empresa = UsuarioEmpresa.objects.get(usuario_ptr_id=p_id_usuario)
+                print("Empresa:", empresa)
+
+                # Obtener información de la organización
+                informacion_general = {
+                    "ruc": {
+                        "label": "RUC",
+                        "value": empresa.ruc,
+                        "type": "text",
+                        "editable": False,
+                        "validation": "number13",
+                        "maxLength": 13
+                    },
+                    "razon_social": {
+                        "label": "Nombre / Razón social",
+                        "value": empresa.razon_social,
+                        "type": "text",
+                        "editable": True,
+                        "validation": "text",
+                        "maxLength": 50
+                    },
+                    "actividad_comercial": {
+                        "label": "Actividad comercial",
+                        "value": empresa.actividad_comercial,
+                        "type": "textarea",
+                        "editable": True,
+                        "validation": "textarea",
+                        "maxLength": 500
+                    },
+                    "ced_rep_legal": {
+                        "label": "Cédula Representante",
+                        "value": empresa.ced_rep_legal,
+                        "type": "text",
+                        "editable": True,
+                        "validation": "number10",
+                        "maxLength": 10
+                    },
+                    "nom_rep_legal": {
+                        "label": "Nombres Representante",
+                        "value": empresa.nom_rep_legal,
+                        "type": "text",
+                        "editable": True,
+                        "validation": "text",
+                        "maxLength": 50
+                    },
+                    "telefono": {
+                        "label": "Teléfono",
+                        "value": empresa.telefono,
+                        "type": "text",
+                        "editable": True,
+                        "validation": "number10",
+                        "maxLength": 10
+                    },
+                    "correo": {
+                        "label": "Correo",
+                        "value": empresa.correo,
+                        "type": "email",
+                        "editable": False,
+                        "validation": "email",
+                        "maxLength": 100
+                    },
+                    "direccion": {
+                        "label": "Dirección",
+                        "value": empresa.direccion,
+                        "type": "textarea",
+                        "editable": True,
+                        "validation": "textarea",
+                        "maxLength": 500
+                    }
+                }
+
+                info_contacto = {
+                    "info_contacto": {
+                        "razon_social": empresa.razon_social,
+                        "direccion": empresa.direccion,
+                        "telefono": empresa.telefono,
+                        "correo": empresa.correo,
+                        "redes_sociales": {
+                            "facebook": empresa.redes.get("facebook",""),
+                            "instagram": empresa.redes.get("instagram",""),
+                            "twitter": empresa.redes.get("twitter",""),
+                            "youtube": empresa.redes.get("youtube",""),
+                            "linkedin": empresa.redes.get("linkedin","")
                         }
                     }
                 }
 
-
-
-                # Combinar información personal del usuario persona y del reciclador si existe
                 response_data = {
-                    "informacion_personal": informacion_personal,
-                    "url_foto": usuario_persona.url_foto,
-                    **reciclador_info
+                    "informacion_general": informacion_general,
+                    "url_foto": empresa.url_foto,
+                    "rol": rol_user.descripcion,
+                    **info_contacto
                 }
-            else:
-                # Si el usuario no es un reciclador, solo devuelve la información personal
-                response_data = {
-                    "informacion_personal": informacion_personal,
-                    "url_foto": usuario_persona.url_foto
-                }
+
             print("todo correcto, data:", response_data)
 
             return JsonResponse({"data": response_data, "success": True}, charset='utf-8')
@@ -1008,49 +1248,94 @@ def listaRecicladoresEmpresa(request):
         return JsonResponse({"error": f"Ocurrió un error al procesar la solicitud: {str(e)}"})
 
 
-def actualizar_datos_persona(persona, body_data):
+def actualizar_datos_persona(persona, request):
     # Para el campo cedula
-    persona.cedula = body_data.get("cedula", persona.cedula) if body_data.get("cedula", "") != "" else persona.cedula
+    persona.cedula = request.POST.get("cedula", persona.cedula)
 
     # Para los campos nombres, apellidos, provincia, ciudad, direccion, fec_nac y genero
-    persona.nombres = body_data.get("nombres", persona.nombres) if body_data.get("nombres", "") != "" else persona.nombres
-    persona.apellidos = body_data.get("apellidos", persona.apellidos) if body_data.get("apellidos", "") != "" else persona.apellidos
-    persona.provincia = body_data.get("provincia", persona.provincia) if body_data.get("provincia", "") != "" else persona.provincia
-    persona.ciudad = body_data.get("ciudad", persona.ciudad) if body_data.get("ciudad", "") != "" else persona.ciudad
-    persona.direccion = body_data.get("direccion", persona.direccion) if body_data.get("direccion", "") != "" else persona.direccion
-    persona.fec_nac = body_data.get("fec_nac", persona.fec_nac) if body_data.get("fec_nac", "") != "" else persona.fec_nac
-    persona.genero = body_data.get("genero", persona.genero) if body_data.get("genero", "") != "" else persona.genero
-    persona.telefono = body_data.get("telefono", persona.telefono) if body_data.get("telefono", "") != "" else persona.telefono
-    persona.url_foto = body_data.get("url_foto", persona.url_foto) if body_data.get("url_foto", "") != "" else persona.url_foto
+    persona.nombres = request.POST.get("nombres", persona.nombres)
+    persona.apellidos = request.POST.get("apellidos", persona.apellidos)
+    persona.provincia = request.POST.get("provincia", persona.provincia)
+    persona.ciudad = request.POST.get("ciudad", persona.ciudad)
+    persona.direccion = request.POST.get("direccion", persona.direccion)
+    persona.fec_nac = request.POST.get("fecha_nacimiento", persona.fec_nac)
+    # Diccionario para mapear los valores de género
+    genero_map = {
+        "Masculino": "M",
+        "Femenino": "F"
+    }
+    genero = request.POST.get("sexo", persona.genero)
 
+    # Asignar si existe en el diccionario, de lo contrario se mantiene el valor por defecto
+    genero = genero_map.get(genero, genero)
+    persona.genero = genero
+    persona.telefono = request.POST.get("telefono", persona.telefono)
+
+    foto = request.FILES.get("foto")
+    if foto:
+        imagen = Imagen(imagen=foto)
+        imagen.save()
+
+        # Construir la URL completa
+        foto_url = request.build_absolute_uri(imagen.imagen.url)
+
+        #actualizo foto
+        persona.url_foto = foto_url if foto_url else persona.url_foto
 
     # Guardar los cambios en la base de datos
     persona.save()
 
-def actualizar_datos_empresa(empresa, body_data):
+def actualizar_datos_empresa(empresa, request):
     # Para los campos razon_social, actividad_comercial, ced_rep_legal, nom_rep_legal y direccion
-    empresa.razon_social = body_data.get("razon_social", empresa.razon_social) if body_data.get("razon_social", "") != "" else empresa.razon_social
-    empresa.actividad_comercial = body_data.get("actividad_comercial", empresa.actividad_comercial) if body_data.get("actividad_comercial", "") != "" else empresa.actividad_comercial
-    empresa.ced_rep_legal = body_data.get("ced_rep_legal", empresa.ced_rep_legal) if body_data.get("ced_rep_legal", "") != "" else empresa.ced_rep_legal
-    empresa.nom_rep_legal = body_data.get("nom_rep_legal", empresa.nom_rep_legal) if body_data.get("nom_rep_legal", "") != "" else empresa.nom_rep_legal
-    empresa.direccion = body_data.get("direccion", empresa.direccion) if body_data.get("direccion", "") != "" else empresa.direccion
-    empresa.telefono = body_data.get("telefono", empresa.telefono) if body_data.get("telefono", "") != "" else empresa.telefono
-    empresa.url_foto = body_data.get("url_foto", empresa.url_foto) if body_data.get("url_foto", "") != "" else empresa.url_foto
+    empresa.razon_social = request.POST.get("razon_social", empresa.razon_social)
+    empresa.actividad_comercial = request.POST.get("actividad_comercial", empresa.actividad_comercial)
+    empresa.ced_rep_legal = request.POST.get("ced_rep_legal", empresa.ced_rep_legal)
+    empresa.nom_rep_legal = request.POST.get("nom_rep_legal", empresa.nom_rep_legal)
+    empresa.direccion = request.POST.get("direccion", empresa.direccion)
+    empresa.telefono = request.POST.get("telefono", empresa.telefono)
+
+    foto = request.FILES.get("foto")
+    if foto:
+        imagen = Imagen(imagen=foto)
+        imagen.save()
+
+        # Construir la URL completa
+        foto_url = request.build_absolute_uri(imagen.imagen.url)
+
+        empresa.url_foto = foto_url if foto_url else empresa.url_foto
 
     # Guardar los cambios en la base de datos
     empresa.save()
 
-def actualizar_datos_reciclador(reciclador, body_data):
+def actualizar_datos_reciclador(reciclador, request):
     # Para los campos nombres, apellidos, provincia, ciudad, direccion, fec_nac, genero y telefono
-    reciclador.nombres = body_data.get("nombres", reciclador.nombres) if body_data.get("nombres", "") != "" else reciclador.nombres
-    reciclador.apellidos = body_data.get("apellidos", reciclador.apellidos) if body_data.get("apellidos", "") != "" else reciclador.apellidos
-    reciclador.provincia = body_data.get("provincia", reciclador.provincia) if body_data.get("provincia", "") != "" else reciclador.provincia
-    reciclador.ciudad = body_data.get("ciudad", reciclador.ciudad) if body_data.get("ciudad", "") != "" else reciclador.ciudad
-    reciclador.direccion = body_data.get("direccion", reciclador.direccion) if body_data.get("direccion", "") != "" else reciclador.direccion
-    reciclador.fec_nac = body_data.get("fec_nac", reciclador.fec_nac) if body_data.get("fec_nac", "") != "" else reciclador.fec_nac
-    reciclador.genero = body_data.get("genero", reciclador.genero) if body_data.get("genero", "") != "" else reciclador.genero
-    reciclador.telefono = body_data.get("telefono", reciclador.telefono) if body_data.get("telefono", "") != "" else reciclador.telefono
-    reciclador.url_foto = body_data.get("url_foto", reciclador.url_foto) if body_data.get("url_foto", "") != "" else reciclador.url_foto
+    reciclador.nombres = request.POST.get("nombres", reciclador.nombres)
+    reciclador.apellidos = request.POST.get("apellidos", reciclador.apellidos)
+    reciclador.provincia = request.POST.get("provincia", reciclador.provincia)
+    reciclador.ciudad = request.POST.get("ciudad", reciclador.ciudad)
+    reciclador.direccion = request.POST.get("direccion", reciclador.direccion)
+    reciclador.fec_nac = request.POST.get("fecha_nacimiento", reciclador.fec_nac)
+    # Diccionario para mapear los valores de género
+    genero_map = {
+        "Masculino": "M",
+        "Femenino": "F"
+    }
+    genero = request.POST.get("sexo", reciclador.genero)
+
+    # Asignar si existe en el diccionario, de lo contrario se mantiene el valor por defecto
+    genero = genero_map.get(genero, genero)
+    reciclador.genero = genero
+    reciclador.telefono = request.POST.get("telefono", reciclador.telefono)
+
+    foto = request.FILES.get("foto")
+    if foto:
+        imagen = Imagen(imagen=foto)
+        imagen.save()
+
+        # Construir la URL completa
+        foto_url = request.build_absolute_uri(imagen.imagen.url)
+
+        reciclador.url_foto = foto_url if foto_url else reciclador.url_foto
 
     # Guardar los cambios en la base de datos
     reciclador.save()
@@ -1058,27 +1343,35 @@ def actualizar_datos_reciclador(reciclador, body_data):
 
 def actualizacionDeCampos(request):
     if request.method == "POST":
-        body_unicode = request.body.decode('utf-8')
-        body_data = json.loads(body_unicode)
-
-        id_usuario = body_data.get("id_usuario")
-        id_rol = body_data.get("id_rol")
+        id_usuario = request.POST.get("id_usuario")
+        id_rol = request.POST.get("id_rol")
 
         try:
             if id_rol == "rol_002":
                 empresa = UsuarioEmpresa.objects.get(id_usuario=id_usuario)
-                actualizar_datos_empresa(empresa, body_data)
+                actualizar_datos_empresa(empresa, request)
             elif id_rol == "rol_003":
                 reciclador = Reciclador.objects.get(id_usuario=id_usuario)
-                actualizar_datos_reciclador(reciclador, body_data)
+                actualizar_datos_reciclador(reciclador, request)
             elif id_rol == "rol_004":
                 persona = UsuarioPersona.objects.get(id_usuario=id_usuario)
-                actualizar_datos_persona(persona, body_data)
+                actualizar_datos_persona(persona, request)
             else:
                 # Manejar caso de rol desconocido
                 return JsonResponse({"error": "Rol de usuario desconocido"})
 
-            return JsonResponse({"message": "Datos actualizados correctamente", "success": True}, safe=False)
+            #obtengo datos actualizados
+            # Llama a la segunda vista con un HttpRequest válido
+            usuario_request = HttpRequest()
+            usuario_request.method = "POST"  # Establece el método como POST
+            usuario_request._body = json.dumps({"id_usuario": id_usuario}).encode('utf-8')  # Crea el cuerpo de la solicitud
+            respuesta_segunda_vista = obtenerInformacionUsuario(usuario_request)
+            data = json.loads(respuesta_segunda_vista.content.decode('utf-8'))
+
+            if data.get("success"):
+                data= data.get("data");
+
+            return JsonResponse({"message": "Datos actualizados correctamente", "success": True, "data": data}, safe=False)
         except Exception as e:
             # Manejar la excepción
             return JsonResponse({"error": str(e)})
@@ -1351,13 +1644,31 @@ def obtener_datos_inicio(request):
 
                 secciones_data.append(seccion_info)
 
-            # Obtener datos de los centros de acopio
-            centros_acopio_data = list(CentroAcopio.objects.filter(estado='A').values(
-                'id', 'organizacion__razon_social', 'nombre_acopio', 'lat', 'lon', 'referencia', 'imageURL'))
+            # Obtener centros de acopio con estado 'A'
+            centros_acopio = CentroAcopio.objects.filter(estado='A')
 
-            # Renombrar el campo organizacion__razon_social a nombre_organizacion
-            for centro in centros_acopio_data:
-                centro['nombre_organizacion'] = centro.pop('organizacion__razon_social')
+            # Construir la respuesta de los centros de acopio
+            centros_acopio_data = []
+            for centro in centros_acopio:
+                # Obtener las URLs de las fotos asociadas al centro de acopio
+                fotos_urls = [request.build_absolute_uri(foto.imagen.url) for foto in centro.fotos.all()]
+
+                centro_info = {
+                    'id': centro.id_centro,
+                    'organizacion': {
+                        'id_usuario': centro.organizacion.id_usuario,
+                        'razon_social': centro.organizacion.razon_social,
+                        'correo': centro.organizacion.correo,
+                        'ruc': centro.organizacion.ruc,
+                        'url_foto': centro.organizacion.url_foto,
+                    },
+                    'nombre_acopio': centro.nombre_acopio,
+                    'ubicacion': centro.ubicacion,
+                    'referencia': centro.referencia,
+                    'fotos': fotos_urls,  # Aquí se incluyen las URLs de las fotos
+                    'informacion': centro.informacion
+                }
+                centros_acopio_data.append(centro_info)
 
             data = {
                 'carrusel': carrusel_data,
@@ -1497,7 +1808,22 @@ def crear_solicitud(request):
                 'fotos': fotos_urls
             })
 
-            return JsonResponse({"success": True, "solicitud_id": solicitud.id_solicitud})
+            #obtengo data de la solicitud
+            solicitud_data = {
+                'id_solicitud': solicitud.id_solicitud,
+                'estado': solicitud.estado,
+                'fecha_inicio': solicitud.fecha_inicio,
+                'id_reciclador': solicitud.id_reciclador,
+                'id_usuario': solicitud.id_usuario.id_usuario,
+                'materiales': solicitud_detalle.materiales if detalle else '',
+                'direccion': solicitud_detalle.direccion if detalle else '',
+                'ubicacion': solicitud_detalle.ubicacion if detalle else '',
+                'ubicacion_reciclador': solicitud_detalle.ubicacion_reciclador if detalle else '',
+                'fecha_arribo': solicitud.fecha_arribo,  # Convertir a cadena ISO 8601
+                'fotos': [request.build_absolute_uri(imagen.imagen.url) for imagen in solicitud_detalle.fotos.all()] if solicitud_detalle else []
+            }
+
+            return JsonResponse({"data": solicitud_data, "solicitud_id": solicitud.id_solicitud, "success": True})
 
         except json.JSONDecodeError:
             return JsonResponse({"error": "La ubicación proporcionada no es válida."})
@@ -1561,6 +1887,12 @@ def aceptar_solicitud_y_actualizar_ubicacion(request):
             'ubicacion_reciclador': solicitud_detalle.ubicacion_reciclador,
             'estado': solicitud.estado,
             'fecha_arribo': solicitud.fecha_arribo.isoformat() if solicitud.fecha_arribo else ''  # Convertir a cadena ISO 8601
+        })
+
+        # Enviar la actualización de estado a través de Pusher
+        pusher_client.trigger(f'solicitudes_channel', 'solicitudes_aceptadas_canceladas', {
+            'id_solicitud': id_solicitud,
+            'estado': solicitud.estado
         })
 
         solicitud_data = {
@@ -1639,8 +1971,10 @@ def cancelar_solicitud(request):
             )
             cancelar_solicitud.save()
 
+            estado_ant = solicitud.estado
+
             #actualizo el estado de la solicitud
-            solicitud.estado="CU"
+            solicitud.estado = "FC" if estado_ant == "P" else "CU"
             solicitud.save()
 
             # Enviar el estado actualizado a través de Pusher
@@ -1648,6 +1982,14 @@ def cancelar_solicitud(request):
                 'id_solicitud': id_solicitud,
                 'estado': solicitud.estado
             })
+
+            if estado_ant == "P": # si la solicitud aún estaba pendiente de ser aceptada entonces envio el estado actualizado a través del pusher para que desaparezca a los recicladores
+                # Enviar la actualización de estado a través de Pusher
+                pusher_client.trigger(f'solicitudes_channel', 'solicitudes_aceptadas_canceladas', {
+                    'id_solicitud': id_solicitud,
+                    'estado': solicitud.estado
+                })
+
         elif solicitud.id_reciclador==id_usuario:#El que cancela es el reciclador
             # Validar que los parámetros estén presentes
             if not p_motivo:
@@ -1795,7 +2137,7 @@ def obtener_solicitudes_por_usuario(request):
                     'ubicacion': detalle.ubicacion if detalle else '',
                     'ubicacion_reciclador': detalle.ubicacion_reciclador if detalle else '',
                     'fecha_arribo': solicitud.fecha_arribo,  # Convertir a cadena ISO 8601
-                    'fotos': [imagen.get_image_url() for imagen in detalle.fotos.all()] if detalle else []
+                    'fotos': [request.build_absolute_uri(imagen.imagen.url) for imagen in detalle.fotos.all()] if detalle else []
                 }
 
                 # Añadir esta solicitud a la lista
@@ -1823,7 +2165,7 @@ def obtener_solicitudes_por_usuario(request):
                     'direccion': detalle.direccion if detalle else '',
                     'ubicacion': detalle.ubicacion if detalle else '',
                     'ubicacion_reciclador': detalle.ubicacion_reciclador if detalle else '',
-                    'fotos': [imagen.get_image_url() for imagen in detalle.fotos.all()] if detalle else []
+                    'fotos': [request.build_absolute_uri(imagen.imagen.url) for imagen in detalle.fotos.all()] if detalle else []
                 }
 
                 # Añadir esta solicitud a la lista
@@ -1890,7 +2232,7 @@ def obtener_ultima_solicitud_pendiente(request):
                 'ubicacion': detalle.ubicacion if detalle else '',
                 'ubicacion_reciclador': detalle.ubicacion_reciclador if detalle else '',
                 'fecha_arribo': ultima_solicitud.fecha_arribo,  # Convertir a cadena ISO 8601
-                'fotos': [imagen.get_image_url() for imagen in detalle.fotos.all()] if detalle else []
+                'fotos': [request.build_absolute_uri(imagen.imagen.url) for imagen in detalle.fotos.all()] if detalle else []
             }
             return JsonResponse({"data": solicitud_data, "success": True})
         else:
@@ -1899,6 +2241,349 @@ def obtener_ultima_solicitud_pendiente(request):
     except Exception as e:
         return JsonResponse({"error": str(e)})
 
+def cambio_clave(request):
+    if request.method == "POST":
+        body_unicode = request.body.decode('utf-8')
+        body_data = json.loads(body_unicode)
+
+        id_usuario = body_data.get("id_usuario")
+
+        # Verificar si el usuario existe
+        usuario = get_object_or_404(Usuario, id_usuario=id_usuario)
+
+        # Crear un token de recuperación
+        recovery_token = get_random_string(length=32)
+
+        # Crear enlace de recuperación
+        cambio_clave_link = f'https://rafaeloxj.pythonanywhere.com/reset_password/{recovery_token}/'
+
+        # Enviar el correo de cambio de contraseña
+        email_subject = 'Solicitud de Cambio de Contraseña'
+        email_body = render_to_string('correo_cambio_clave.html', {
+            'nombre_usuario': usuario.correo,
+            'cambio_clave_link': cambio_clave_link
+        })
+
+        send_mail(
+            email_subject,
+            email_body,
+            'rafaelzambranomendoza@gmail.com',  # Usa un correo configurado para este propósito
+            [usuario.correo],
+            fail_silently=False,
+            html_message=email_body,
+        )
+
+        return JsonResponse({"success": True, "message": "Correo de cambio de contraseña enviado."})
+
+    return JsonResponse({"error": "Método no permitido."})
+
+
+def reset_password(request, token):
+    if request.method == "POST":
+        nueva_clave = request.POST.get("nueva_clave")
+        confirmacion_clave = request.POST.get("confirmacion_clave")
+
+        if not nueva_clave or not confirmacion_clave:
+            return render(request, 'cambiar_clave.html', {
+                'error': "Las contraseñas no pueden estar vacías.",
+                'token': token
+            })
+
+        if nueva_clave != confirmacion_clave:
+            return render(request, 'cambiar_clave.html', {
+                'error': "Las contraseñas no coinciden.",
+                'token': token
+            })
+
+        # Aquí debes buscar al usuario original para cambiar la contraseña
+        try:
+            usuario = get_object_or_404(Usuario, email_verification_token=token)
+
+            # Cambiar la contraseña
+            usuario.clave = make_password(nueva_clave)
+            usuario.save()
+
+            return render(request, 'verificacion_correcta.html', {
+                'razon_social': usuario.correo,  # O el nombre del usuario si es necesario
+                'error': None
+            })
+        except Usuario.DoesNotExist:
+            return render(request, 'cambiar_clave.html', {
+                'error': "Token de recuperación no válido.",
+                'token': token
+            })
+
+    return render(request, 'cambiar_clave.html', {'token': token})
+
+
+def crear_centro_acopio(request):
+    if request.method == "POST":
+        try:
+            # Validar que todos los campos requeridos están presentes
+            organizacion_id = request.POST.get("organizacion")
+            nombre_acopio = request.POST.get("nombre_acopio")
+            ubicacion = request.POST.get("ubicacion")
+            referencia = request.POST.get("referencia")
+            informacion = request.POST.get("informacion")
+            fotos = request.FILES.getlist("fotos[]")
+
+            if not all([organizacion_id, nombre_acopio, ubicacion, referencia, informacion]):
+                return JsonResponse({"error": "Todos los campos obligatorios deben estar presentes."})
+
+            # Convertir la ubicación a una lista si es necesario
+            ubicacion = json.loads(ubicacion)
+
+            # Validar que la organización existe
+            try:
+                organizacion = UsuarioEmpresa.objects.get(usuario_ptr_id=organizacion_id)
+            except UsuarioEmpresa.DoesNotExist:
+                return JsonResponse({"error": "Organización no encontrada."})
+
+            # Crear el centro de acopio
+            centro_acopio = CentroAcopio(
+                organizacion=organizacion,
+                nombre_acopio=nombre_acopio,
+                ubicacion=ubicacion,
+                referencia=referencia,
+                estado="A",
+                informacion=informacion
+            )
+
+            # Guardar el centro de acopio en la base de datos
+            centro_acopio.save()
+
+            # Guardar las imágenes y generar las URLs
+            fotos_urls = []
+            for foto_data in fotos:
+                imagen = Imagen(imagen=foto_data)
+                imagen.save()
+
+                # Construir la URL completa
+                foto_url = request.build_absolute_uri(imagen.imagen.url)
+                fotos_urls.append(foto_url)
+
+                # Añadir la imagen al centro de acopio
+                centro_acopio.fotos.add(imagen)
+
+            # Guardar las relaciones de las imágenes
+            centro_acopio.save()
+
+            # Enviar respuesta de éxito con los datos del nuevo centro de acopio
+            return obtener_centros_acopio_empresa(request, organizacion_id)
+
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "La ubicación proporcionada no es válida."})
+        except Exception as e:
+            return JsonResponse({"error": f"Ocurrió un error: {str(e)}"})
+    else:
+        return JsonResponse({"error": "Método no permitido"})
+
+def actualizar_centro_acopio(request):
+    if request.method == "POST":
+        try:
+            # Validar que todos los campos requeridos están presentes
+            id_centro = request.POST.get("id_centro")
+            organizacion_id = request.POST.get("organizacion")
+            nombre_acopio = request.POST.get("nombre_acopio")
+            ubicacion = request.POST.get("ubicacion")
+            referencia = request.POST.get("referencia")
+            informacion = request.POST.get("informacion")
+            fotos = request.FILES.getlist("fotos[]")
+
+            if not all([id_centro, organizacion_id, nombre_acopio, ubicacion, referencia, informacion]):
+                return JsonResponse({"error": "Todos los campos obligatorios deben estar presentes."})
+
+            # Convertir la ubicación a una lista si es necesario
+            ubicacion = json.loads(ubicacion)
+
+            # Validar que el centro de acopio y la organización existen
+            try:
+                centro_acopio = CentroAcopio.objects.get(id_centro=id_centro)
+            except CentroAcopio.DoesNotExist:
+                return JsonResponse({"error": "Centro de acopio no encontrado."})
+
+            try:
+                organizacion = UsuarioEmpresa.objects.get(usuario_ptr_id=organizacion_id)
+            except UsuarioEmpresa.DoesNotExist:
+                return JsonResponse({"error": "Organización no encontrada."})
+
+            # Actualizar los campos del centro de acopio
+            centro_acopio.organizacion = organizacion
+            centro_acopio.nombre_acopio = nombre_acopio
+            centro_acopio.ubicacion = ubicacion
+            centro_acopio.referencia = referencia
+            centro_acopio.informacion = informacion
+
+            # Guardar cambios en el centro de acopio
+            centro_acopio.save()
+
+            fotos_urls = []
+            # Limpiar las imágenes existentes si se proporcionan nuevas
+            if fotos:
+                centro_acopio.fotos.clear()
+
+                # Guardar las nuevas imágenes y generar las URLs
+                for foto_data in fotos:
+                    imagen = Imagen(imagen=foto_data)
+                    imagen.save()
+
+                    foto_url = request.build_absolute_uri(imagen.imagen.url)
+                    fotos_urls.append(foto_url)
+
+                    centro_acopio.fotos.add(imagen)
+
+            # Guardar las relaciones de las imágenes
+            centro_acopio.save()
+
+            # Enviar respuesta de éxito con los datos actualizados
+            return obtener_centros_acopio_empresa(request, organizacion_id)
+
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "La ubicación proporcionada no es válida."})
+        except Exception as e:
+            return JsonResponse({"error": f"Ocurrió un error: {str(e)}"})
+    else:
+        return JsonResponse({"error": "Método no permitido"})
+
+
+def eliminar_centro_acopio(request):
+    if request.method == "POST":
+        body_unicode = request.body.decode('utf-8')
+        body_data = json.loads(body_unicode)
+
+        id_centro = body_data.get("id_centro")
+        organizacion_id = body_data.get("organizacion")
+
+        if not all([id_centro, organizacion_id]):
+            return JsonResponse({"error": "Todos los campos obligatorios deben estar presentes."})
+
+        try:
+            organizacion = UsuarioEmpresa.objects.get(usuario_ptr_id=organizacion_id)
+        except UsuarioEmpresa.DoesNotExist:
+            return JsonResponse({"error": "Organización no encontrada."})
+
+        try:
+            centro_acopio = CentroAcopio.objects.get(id_centro=id_centro)
+            if centro_acopio.organizacion != organizacion:
+                return JsonResponse({"error": "El centro de acopio no pertenece a la organización."})
+
+            centro_acopio.estado = 'I'  # Cambiar el estado a 'Inactivo'
+            centro_acopio.save()
+
+            #respuesta
+            return obtener_centros_acopio_empresa(request, organizacion_id)
+
+        except CentroAcopio.DoesNotExist:
+            return JsonResponse({"error": "Centro de acopio no encontrado"}, status=404)
+        except Exception as e:
+            return JsonResponse({"error": f"Ocurrió un error: {str(e)}"}, status=500)
+    else:
+        return JsonResponse({"error": "Método no permitido"}, status=405)
+
+def obtener_centros_acopio(request):
+    if request.method == "POST":
+        body_unicode = request.body.decode('utf-8')
+        body_data = json.loads(body_unicode)
+
+        organizacion_id = body_data.get("id_usuario")
+
+        return obtener_centros_acopio_empresa(request, organizacion_id)
+    else:
+        return JsonResponse({"error": "Método no permitido"})
+
+def obtener_centros_acopio_empresa(request, p_id_usuario):
+    try:
+        # Obtener la empresa relacionada con este usuario
+        empresa = UsuarioEmpresa.objects.get(usuario_ptr_id=p_id_usuario)
+
+        # Obtener centros de acopio con estado 'A' de la empresa
+        centros_acopio = CentroAcopio.objects.filter(organizacion=empresa, estado='A')
+
+        # Construir la respuesta de los centros de acopio
+        centros_acopio_data = []
+        for centro in centros_acopio:
+            # Obtener las URLs de las fotos asociadas al centro de acopio
+            fotos_urls = [request.build_absolute_uri(foto.imagen.url) for foto in centro.fotos.all()]
+
+            centro_info = {
+                'id': centro.id_centro,
+                'organizacion': {
+                    'id_usuario': centro.organizacion.id_usuario,
+                    'razon_social': centro.organizacion.razon_social,
+                    'correo': centro.organizacion.correo,
+                    'ruc': centro.organizacion.ruc,
+                    'url_foto': centro.organizacion.url_foto,
+                },
+                'nombre_acopio': centro.nombre_acopio,
+                'ubicacion': centro.ubicacion,
+                'referencia': centro.referencia,
+                'fotos': fotos_urls,  # Aquí se incluyen las URLs de las fotos
+                'informacion': centro.informacion
+            }
+            centros_acopio_data.append(centro_info)
+
+        # Responder con los datos de los centros de acopio
+        return JsonResponse({"data": centros_acopio_data, "success": True})
+
+    except Usuario.DoesNotExist:
+        return JsonResponse({"error": "Usuario no encontrado"})
+    except UsuarioEmpresa.DoesNotExist:
+        return JsonResponse({"error": "Empresa no asociada al usuario"})
+    except Exception as e:
+        return JsonResponse({"error": str(e)})
+
+def actualizar_redes_empresa(request):
+    if request.method == "POST":
+        body_unicode = request.body.decode('utf-8')
+        body_data = json.loads(body_unicode)
+
+        facebook = body_data.get("facebook")
+        instagram = body_data.get("instagram")
+        twitter = body_data.get("twitter")
+        youtube = body_data.get("youtube")
+        linkedin = body_data.get("linkedin")
+        id_usuario = body_data.get("id_usuario")
+
+        if not id_usuario:
+            return JsonResponse({"error": "Falta id_usuario."})
+
+        try:
+            organizacion = UsuarioEmpresa.objects.get(usuario_ptr_id=id_usuario)
+        except UsuarioEmpresa.DoesNotExist:
+            return JsonResponse({"error": "Organización no encontrada."})
+
+        try:
+
+            organizacion.redes = {
+                key: value
+                for key, value in {
+                    'facebook': facebook,
+                    'instagram': instagram,
+                    'linkedin': linkedin,
+                    'twitter': twitter,
+                    'youtube': youtube,
+                }.items()
+                if value  # Solo incluir si el valor no es None o vacío
+            }
+
+            organizacion.save()
+
+            #obtengo datos actualizados
+            # Llama a la segunda vista con un HttpRequest válido
+            usuario_request = HttpRequest()
+            usuario_request.method = "POST"  # Establece el método como POST
+            usuario_request._body = json.dumps({"id_usuario": id_usuario}).encode('utf-8')  # Crea el cuerpo de la solicitud
+            respuesta_segunda_vista = obtenerInformacionUsuario(usuario_request)
+            data = json.loads(respuesta_segunda_vista.content.decode('utf-8'))
+
+            if data.get("success"):
+                data= data.get("data");
+
+            return JsonResponse({"message": "Datos actualizados correctamente", "success": True, "data": data}, safe=False)
+        except Exception as e:
+            return JsonResponse({"error": f"Ocurrió un error: {str(e)}"}, status=500)
+    else:
+        return JsonResponse({"error": "Método no permitido"}, status=405)
 
 
 '''

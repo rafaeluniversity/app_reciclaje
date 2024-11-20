@@ -41,7 +41,7 @@ class Usuario(models.Model):
     ESTADO_CHOICES = [('A', 'Activo'), ('I', 'Inactivo')]
     estado = models.CharField(max_length=1, choices=ESTADO_CHOICES, default='A')
     fecha_registro = models.DateTimeField(auto_now_add=True)
-    url_foto = models.URLField(max_length=200, blank=True, null=True)
+    url_foto = models.URLField(max_length=500, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         # Genera automáticamente el id_usuario como 'user_001', 'user_002', etc.
@@ -328,7 +328,7 @@ class QuienesSomos(models.Model):
 
 class Seccion(models.Model):
     title = models.CharField(max_length=50)
-    imageURL = models.URLField(max_length=200)
+    imageURL = models.URLField(max_length=200, null=True, blank=True)
     orden = models.IntegerField()
     estado = models.CharField(max_length=10, choices=[('A', 'Activo'), ('I', 'Inactivo')])
 
@@ -339,7 +339,7 @@ class Parrafo(models.Model):
     seccion = models.ForeignKey(Seccion, related_name='parrafos', on_delete=models.CASCADE)
     title = models.CharField(max_length=50)
     content = models.TextField()
-    imageURL = models.URLField(max_length=200)
+    imageURL = models.URLField(max_length=200, null=True, blank=True)
     orden = models.IntegerField()
     estado = models.CharField(max_length=10, choices=[('A', 'Activo'), ('I', 'Inactivo')])
 
@@ -348,7 +348,7 @@ class Parrafo(models.Model):
 
 class Timeline(models.Model):
     seccion = models.ForeignKey(Seccion, related_name='timelines', on_delete=models.CASCADE)
-    title = models.CharField(max_length=50)
+    title = models.CharField(max_length=50, null=True, blank=True)
     orden = models.IntegerField()
     estado = models.CharField(max_length=10, choices=[('A', 'Activo'), ('I', 'Inactivo')])
 
@@ -371,15 +371,21 @@ class PasosTimeline(models.Model):
             raise ValidationError({'numero': 'El número de paso debe ser único dentro del timeline.'})
 
 class CentroAcopio(models.Model):
-    organizacion = models.ForeignKey(UsuarioEmpresa, related_name='centros_acopio', on_delete=models.CASCADE)
+    id_centro = models.AutoField(primary_key=True)  # Define id_centro como clave primaria
+    organizacion = models.ForeignKey('UsuarioEmpresa', related_name='centros_acopio', on_delete=models.CASCADE)
     nombre_acopio = models.CharField(max_length=100)
     ubicacion = models.JSONField(help_text="Ubicación como lista [latitud, longitud]")
     referencia = models.TextField()
-    imageURL = models.URLField(max_length=200)
     estado = models.CharField(max_length=10, choices=[('A', 'Activo'), ('I', 'Inactivo')])
+    informacion = models.CharField(max_length=250, blank=True, null=True, help_text="Información adicional sobre el centro de acopio")
+    fotos = models.ManyToManyField(Imagen, related_name='centros_acopio_imagen', blank=True)
 
     def __str__(self):
         return f"{self.nombre_acopio} - {self.organizacion.razon_social}"
+
+    def save(self, *args, **kwargs):
+        # Validar antes de guardar
+        super().save(*args, **kwargs)
 
 class SolicitudRechazada(models.Model):
     id_solicitud = models.ForeignKey('SolicitudRecoleccion', on_delete=models.CASCADE, related_name='rechazos')
@@ -396,7 +402,7 @@ class UsuarioTemporal(models.Model):
     email_verification_token = models.CharField(max_length=100, blank=True, null=True)
     is_email_verified = models.BooleanField(default=False)
     tipo_usuario = models.CharField(max_length=10, choices=[('empresa', 'Empresa'), ('persona', 'Persona'), ('reciclador', 'Reciclador')])
-    datos_adicionales = models.TextField()  # Puedes usar JSONField si está disponible en tu base de datos
+    datos_adicionales = JSONField(default=dict, blank=True, null=True)  # Usar JSONField para datos adicionales
 
     def __str__(self):
         return self.correo

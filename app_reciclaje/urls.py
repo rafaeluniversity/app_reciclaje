@@ -32,7 +32,9 @@ from api.views import (registroEmpresa, registroPersona,
                        obtener_registro_reciclaje, obtener_datos_inicio,crear_solicitud,
                        rechazar_solicitud,obtener_solicitudes_por_usuario,aceptar_solicitud_y_actualizar_ubicacion,
                        obtener_ultima_solicitud_pendiente,cancelar_solicitud,confirmar_cancelacion_solicitud,
-                       enviar_correo)
+                       verificar_correo, cambio_clave, reset_password,
+                       obtener_centros_acopio,crear_centro_acopio, eliminar_centro_acopio, actualizar_centro_acopio,
+                       actualizar_redes_empresa)
 
 
 urlpatterns = [
@@ -70,6 +72,14 @@ urlpatterns = [
     path('obtener_ultima_solicitud_pendiente/', obtener_ultima_solicitud_pendiente, name='obtener_ultima_solicitud_pendiente'),
     path('api/v1/cancelar_solicitud/', cancelar_solicitud, name='cancelar_solicitud'),
     path('api/v1/confirmar_cancelacion_solicitud/', confirmar_cancelacion_solicitud, name='confirmar_cancelacion_solicitud'),
-    path('enviar-correo/', enviar_correo, name='enviar_correo'),
+    path('verify_email/<str:token>/', verificar_correo, name='verify_email'),
+    path('cambio_clave/', cambio_clave, name='cambio_clave'),  # URL para solicitar el cambio de contraseña
+    path('reset_password/<str:token>/', reset_password, name='reset_password'),  # URL para cambiar la contraseña
+    path('api/v1/obtener_centros_acopio/', obtener_centros_acopio, name='obtener_centros_acopio'),
+    path('api/v1/crear_centros_acopio/', crear_centro_acopio, name='crear_centro_acopio'),
+    path('api/v1/actualizar_centros_acopio/', actualizar_centro_acopio, name='actualizar_centro_acopio'),
+    path('api/v1/eliminar_centros_acopio/', eliminar_centro_acopio, name='eliminar_centro_acopio'),
+    path('api/v1/actualizar_redes_empresa/', actualizar_redes_empresa, name='actualizar_redes_empresa'),
+
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

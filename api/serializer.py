@@ -88,8 +88,15 @@ class QuienesSomosSerializer(serializers.ModelSerializer):
     class Meta:
         model = QuienesSomos
         fields = '__all__'
-
+'''
 class SeccionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Seccion
+        fields = '__all__'
+'''
+class SeccionSerializer(serializers.ModelSerializer):
+    imageURL = serializers.URLField(allow_blank=True, required=False)
+
     class Meta:
         model = Seccion
         fields = '__all__'
@@ -100,6 +107,8 @@ class ParrafoSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class TimelineSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(allow_blank=True, required=False)
+
     class Meta:
         model = Timeline
         fields = '__all__'
